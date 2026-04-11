@@ -22,6 +22,8 @@ tokio = { workspace = true, features = [
     "signal",
 ] }
 clap = { workspace = true, features = ["derive"] }
+ipnet = "2.12.0"
+thiserror = "2.0.18"
 [build-dependencies]
 anyhow = { workspace = true }
 aya-build = { workspace = true }
@@ -39,6 +41,10 @@ cargo_metadata = { workspace = true }
 # workflows with stable cargo; stable cargo outright refuses to load manifests that use unstable
 # features.
 push-packet-ebpf = { path = "../push-packet-ebpf" }
+
+[lib]
+name = "push_packet"
+path = "src/lib.rs"
 
 [[bin]]
 name = "push-packet"

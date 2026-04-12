@@ -10,6 +10,10 @@ pub enum Error {
     MissingRuleConstraint,
     #[error("each rule must have an accompanying action set")]
     MissingRuleAction,
+    #[error("the matching engine is at capacity and cannot accept additional rules")]
+    EngineAtCapacity,
+    #[error("no rule found with this RuleId")]
+    MissingRuleId,
     #[error(transparent)]
     Infallible(#[from] Infallible),
 }

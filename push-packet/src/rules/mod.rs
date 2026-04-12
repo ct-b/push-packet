@@ -12,7 +12,11 @@ pub use action::Action;
 use net::IntoIpNet;
 use port::IntoPortRange;
 
+#[derive(Clone, Copy)]
+pub struct RuleId(pub usize);
+
 pub struct Rule {
+    name: Option<String>,
     action: Action,
     protocol: Option<Protocol>,
     source_cidr: Option<IpNet>,
@@ -32,6 +36,12 @@ impl Rule {
     pub fn builder() -> RuleBuilder {
         RuleBuilder::default()
     }
+    /// Creates a `RuleBuilder` and sets the rule's name. This is optional, and simply a convenience for organization. There is
+    /// no enforcement that names are unique, this is left to the user.
+    pub fn name(name: impl Into<String>) -> RuleBuilder {
+        Rule::builder().name(name)
+    }
+
     /// Creates a `RuleBuilder` and sets the rule's `Action`
     ///
     /// The action applies to all packets matching the rule, unless overridden by successive rules.
@@ -85,6 +95,7 @@ impl Rule {
 
 #[derive(Default)]
 pub struct RuleBuilder {
+    name: Option<String>,
     action: Option<Action>,
     protocol: Option<Protocol>,
     source_cidr: Option<Result<IpNet, Error>>,
@@ -94,6 +105,13 @@ pub struct RuleBuilder {
 }
 
 impl RuleBuilder {
+    /// Sets the rule's name. This is optional, and simply a convenience for organization. There is
+    /// no enforcement that names are unique, this is left to the user.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
     /// Sets the rule's `Action`
     ///
     /// The action applies to all packets matching the rule, unless overridden by successive rules.
@@ -158,6 +176,7 @@ impl RuleBuilder {
     /// ports, protocols)
     pub fn build(self) -> Result<Rule, Error> {
         let Self {
+            name,
             action,
             protocol,
             source_cidr,
@@ -188,6 +207,7 @@ impl RuleBuilder {
         };
 
         Ok(Rule {
+            name,
             action,
             protocol,
             source_cidr,
@@ -203,7 +223,7 @@ mod tests {
 
     use crate::{
         error::Error,
-        filter::rules::{Rule, action::Action},
+        rules::{Rule, action::Action},
     };
 
     #[test]

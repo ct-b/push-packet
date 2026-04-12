@@ -23,7 +23,7 @@ impl IntoPortRange for Range<u16> {
 mod tests {
     use std::ops::RangeInclusive;
 
-    use crate::filter::rules::port::IntoPortRange;
+    use crate::rules::port::IntoPortRange;
 
     fn converter(value: impl IntoPortRange) -> RangeInclusive<u16> {
         value.into_port_range()

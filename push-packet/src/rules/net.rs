@@ -53,7 +53,7 @@ mod tests {
 
     use ipnet::IpNet;
 
-    use crate::{error::Error, filter::rules::net::IntoIpNet};
+    use crate::{error::Error, rules::net::IntoIpNet};
 
     #[test]
     fn parse_bare_ipv4() {

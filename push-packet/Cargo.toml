@@ -9,9 +9,9 @@ license.workspace = true
 push-packet-common = { path = "../push-packet-common", features = ["user"] }
 
 aya = { workspace = true }
-ipnet = "2.12.0"
-thiserror = "2.0.18"
-nix = {version="0.31.2", features=["net"]}
+ipnet = { workspace = true }
+thiserror = {workspace = true}
+nix = {workspace=true, features=["net"]}
 
 [build-dependencies]
 aya-build = { workspace = true, optional = true }
@@ -33,7 +33,7 @@ push-packet-ebpf = { path = "../push-packet-ebpf", optional=true }
 
 [features]
 default = ["linear"]
-linear = []
+linear = ["push-packet-common/linear"]
 build-ebpf = ["dep:aya-build", "dep:cargo_metadata", "dep:push-packet-ebpf"]
 
 [lib]

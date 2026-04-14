@@ -1,4 +1,4 @@
-use std::{convert::Infallible, ffi::IntoStringError};
+use std::{convert::Infallible, ffi::IntoStringError, num::TryFromIntError};
 
 use aya::{EbpfError, programs::ProgramError};
 
@@ -20,6 +20,16 @@ pub enum Error {
     InvalidInterfaceIndex(u32),
     #[error("invalid network interface {0}")]
     InvalidInterfaceName(String),
+    #[error("source and destination addresses must be of the same address family")]
+    IncompatibleAddresses,
+    #[error("missing eBPF map")]
+    MissingEbpfMap,
+    #[error("missing eBPF program")]
+    MissingEbpfProgram,
+    #[error(transparent)]
+    TryFromIntError(#[from] TryFromIntError),
+    #[error(transparent)]
+    MapError(#[from] aya::maps::MapError),
     #[error(transparent)]
     IntoStringError(#[from] IntoStringError),
     #[error(transparent)]

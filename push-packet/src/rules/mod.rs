@@ -16,13 +16,13 @@ use port::IntoPortRange;
 pub struct RuleId(pub usize);
 
 pub struct Rule {
-    name: Option<String>,
-    action: Action,
-    protocol: Option<Protocol>,
-    source_cidr: Option<IpNet>,
-    source_port: Option<RangeInclusive<u16>>,
-    destination_cidr: Option<IpNet>,
-    destination_port: Option<RangeInclusive<u16>>,
+    pub(crate) name: Option<String>,
+    pub(crate) action: Action,
+    pub(crate) protocol: Option<Protocol>,
+    pub(crate) source_cidr: Option<IpNet>,
+    pub(crate) source_port: Option<RangeInclusive<u16>>,
+    pub(crate) destination_cidr: Option<IpNet>,
+    pub(crate) destination_port: Option<RangeInclusive<u16>>,
 }
 
 impl TryFrom<RuleBuilder> for Rule {
@@ -32,7 +32,23 @@ impl TryFrom<RuleBuilder> for Rule {
     }
 }
 
+pub enum AddressFamily {
+    Any,
+    Ipv4,
+    Ipv6,
+}
+
 impl Rule {
+    /// Returns the rule's AddressFamily, or `AddressFamily::Any` if no addresses are set.
+    pub fn address_family(&self) -> AddressFamily {
+        match (self.source_cidr, self.destination_cidr) {
+            (Some(net), _) | (_, Some(net)) => match net {
+                IpNet::V4(_) => AddressFamily::Ipv4,
+                IpNet::V6(_) => AddressFamily::Ipv6,
+            },
+            _ => AddressFamily::Any,
+        }
+    }
     pub fn builder() -> RuleBuilder {
         RuleBuilder::default()
     }
@@ -196,14 +212,19 @@ impl RuleBuilder {
             return Err(Error::MissingRuleConstraint);
         }
 
-        let source_cidr = match source_cidr {
-            Some(cidr) => Some(cidr?),
-            None => None,
-        };
-
-        let destination_cidr = match destination_cidr {
-            Some(cidr) => Some(cidr?),
-            None => None,
+        let (source_cidr, destination_cidr) = match (source_cidr, destination_cidr) {
+            (Some(src), Some(dst)) => {
+                let (src, dst) = (src?, dst?);
+                match (&src, &dst) {
+                    (IpNet::V4(_), IpNet::V6(_)) | (IpNet::V6(_), IpNet::V4(_)) => {
+                        return Err(Error::IncompatibleAddresses);
+                    }
+                    _ => (Some(src), Some(dst)),
+                }
+            }
+            (Some(src), None) => (Some(src?), None),
+            (None, Some(src)) => (None, Some(src?)),
+            _ => (None, None),
         };
 
         Ok(Rule {

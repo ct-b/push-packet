@@ -399,6 +399,7 @@ name = "push-packet-common"
 version = "0.1.0"
 dependencies = [
  "aya",
+ "ipnet",
 ]
 
 [[package]]

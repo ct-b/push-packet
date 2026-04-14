@@ -31,7 +31,7 @@ impl Tap {
         I::Error: Into<Error>,
     {
         let interface = interface.try_into().map_err(Into::into)?;
-        let engine = LinearEngine::new();
+        let engine = LinearEngine::new(None);
         let filter = Filter::default();
         Ok(Self {
             interface,
@@ -43,6 +43,18 @@ impl Tap {
 }
 
 impl<E: Engine> Tap<E> {
+    pub fn engine(&self) -> &E {
+        &self.engine
+    }
+    pub fn engine_mut(&mut self) -> &mut E {
+        &mut self.engine
+    }
+    pub fn ebpf(&self) -> Option<&Ebpf> {
+        self.ebpf.as_ref()
+    }
+    pub fn ebpf_mut(&mut self) -> Option<&mut Ebpf> {
+        self.ebpf.as_mut()
+    }
     pub fn new_with_engine<I>(interface: I, engine: E) -> Result<Self, Error>
     where
         I: TryInto<Interface>,
@@ -59,8 +71,18 @@ impl<E: Engine> Tap<E> {
     }
 
     pub fn start(&mut self) -> Result<(), Error> {
-        let mut ebpf = aya::Ebpf::load(E::EBPF_BYTES)?;
-        let program: &mut Xdp = ebpf.program_mut("push_packet").unwrap().try_into()?;
+        let mut loader = aya::EbpfLoader::new();
+        for (name, size) in self.engine.map_capacities() {
+            loader.map_max_entries(name, size);
+        }
+        let mut ebpf = loader.load(E::EBPF_BYTES)?;
+        for (rule_id, rule) in self.filter.iter_rules() {
+            self.engine.add_rule(rule_id, rule, &mut ebpf)?;
+        }
+        let program: &mut Xdp = ebpf
+            .program_mut(E::EBPF_PROGAM_NAME)
+            .ok_or(Error::MissingEbpfProgram)?
+            .try_into()?;
         program.load()?;
         program.attach(self.interface.name(), XdpFlags::default())?;
         self.ebpf = Some(ebpf);
@@ -73,8 +95,6 @@ impl<E: Engine> Tap<E> {
         R::Error: Into<Error>,
     {
         let rule = rule.try_into().map_err(Into::into)?;
-        let rule_id = self.filter.next_rule_id();
-        self.engine.add_rule(rule_id, &rule)?;
         self.filter.add(rule);
         Ok(self)
     }
@@ -86,14 +106,18 @@ impl<E: Engine> Tap<E> {
     {
         let rule = rule.try_into().map_err(Into::into)?;
         let rule_id = self.filter.next_rule_id();
-        self.engine.add_rule(rule_id, &rule)?;
+        if let Some(ebpf) = &mut self.ebpf {
+            self.engine.add_rule(rule_id, &rule, ebpf)?;
+        }
         self.filter.add(rule);
         Ok(rule_id)
     }
 
     pub fn remove_rule(&mut self, rule_id: RuleId) -> Result<Rule, Error> {
         let rule = self.filter.get(rule_id).ok_or(Error::MissingRuleId)?;
-        self.engine.remove_rule(rule_id, rule)?;
+        if let Some(ebpf) = &mut self.ebpf {
+            self.engine.remove_rule(rule_id, rule, ebpf)?;
+        }
         self.filter.remove(rule_id).ok_or(Error::MissingRuleId)
     }
 }

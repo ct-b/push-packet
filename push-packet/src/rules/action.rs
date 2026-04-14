@@ -6,6 +6,7 @@
 /// `take` field optionally limits the copied data to a certain number of bytes.
 /// `Action::Route` routes the packet to userspace.
 #[non_exhaustive]
+#[derive(Clone, Copy)]
 pub enum Action {
     Pass,
     Drop,

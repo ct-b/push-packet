@@ -42,6 +42,16 @@ impl Filter {
             }
         }
     }
+
+    pub fn iter_rules(&self) -> impl Iterator<Item = (RuleId, &Rule)> {
+        self.rules
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rule)| match rule {
+                None => None,
+                Some(rule) => Some((RuleId(index), rule)),
+            })
+    }
 }
 
 #[cfg(test)]

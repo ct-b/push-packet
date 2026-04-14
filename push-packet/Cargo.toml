@@ -8,26 +8,15 @@ license.workspace = true
 [dependencies]
 push-packet-common = { path = "../push-packet-common", features = ["user"] }
 
-anyhow = { workspace = true, default-features = true }
 aya = { workspace = true }
-aya-log = { workspace = true }
-env_logger = { workspace = true }
-libc = { workspace = true }
-log = { workspace = true }
-tokio = { workspace = true, features = [
-    "macros",
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "signal",
-] }
-clap = { workspace = true, features = ["derive"] }
 ipnet = "2.12.0"
 thiserror = "2.0.18"
+nix = {version="0.31.2", features=["net"]}
+
 [build-dependencies]
-anyhow = { workspace = true }
-aya-build = { workspace = true }
-cargo_metadata = { workspace = true }
+aya-build = { workspace = true, optional = true }
+cargo_metadata = { workspace = true, optional = true }
+anyhow = { workspace = true, default-features = true, optional=true }
 # TODO(https://github.com/rust-lang/cargo/issues/12375): this should be an artifact dependency, but
 # it's not possible to tell cargo to use `-Z build-std` to build it. We cargo-in-cargo in the build
 # script to build this, but we want to teach cargo about the dependency so that cache invalidation
@@ -40,12 +29,13 @@ cargo_metadata = { workspace = true }
 # Finally note that *any* usage of `artifact = ...` in *any* Cargo.toml in the workspace breaks
 # workflows with stable cargo; stable cargo outright refuses to load manifests that use unstable
 # features.
-push-packet-ebpf = { path = "../push-packet-ebpf" }
+push-packet-ebpf = { path = "../push-packet-ebpf", optional=true }
+
+[features]
+default = ["linear"]
+linear = []
+build-ebpf = ["dep:aya-build", "dep:cargo_metadata", "dep:push-packet-ebpf"]
 
 [lib]
 name = "push_packet"
 path = "src/lib.rs"
-
-[[bin]]
-name = "push-packet"
-path = "src/main.rs"

@@ -1,4 +1,6 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, ffi::IntoStringError};
+
+use aya::{EbpfError, programs::ProgramError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -14,6 +16,16 @@ pub enum Error {
     EngineAtCapacity,
     #[error("no rule found with this RuleId")]
     MissingRuleId,
+    #[error("invalid network interface {0}")]
+    InvalidInterfaceIndex(u32),
+    #[error("invalid network interface {0}")]
+    InvalidInterfaceName(String),
+    #[error(transparent)]
+    IntoStringError(#[from] IntoStringError),
+    #[error(transparent)]
+    EbpfError(#[from] EbpfError),
+    #[error(transparent)]
+    ProgramError(#[from] ProgramError),
     #[error(transparent)]
     Infallible(#[from] Infallible),
 }

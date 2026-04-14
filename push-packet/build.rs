@@ -1,7 +1,7 @@
-use anyhow::{Context as _, anyhow};
-use aya_build::Toolchain;
-
-fn main() -> anyhow::Result<()> {
+#[cfg(feature = "build-ebpf")]
+fn build_packages() -> anyhow::Result<()> {
+    use anyhow::{Context as _, anyhow};
+    use aya_build::Toolchain;
     let cargo_metadata::Metadata { packages, .. } = cargo_metadata::MetadataCommand::new()
         .no_deps()
         .exec()
@@ -24,4 +24,10 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     aya_build::build_ebpf([ebpf_package], Toolchain::default())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "build-ebpf")]
+    build_packages()?;
+    Ok(())
 }

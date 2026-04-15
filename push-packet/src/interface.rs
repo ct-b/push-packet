@@ -1,4 +1,5 @@
 use nix::net::if_::{if_indextoname, if_nametoindex};
+use push_packet_common::FrameKind;
 
 use crate::error::Error;
 
@@ -25,6 +26,19 @@ impl Interface {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn frame_kind(&self) -> Result<FrameKind, Error> {
+        let value: u32 = std::fs::read_to_string(format!("/sys/class/net/{}/type", self.name))
+            .unwrap_or_default()
+            .trim()
+            .parse()
+            .map_err(|_e| Error::InvalidFrameKind(0))?;
+        match value {
+            1 | 772 => Ok(FrameKind::Eth),
+            65534 => Ok(FrameKind::Ip),
+            other => Err(Error::InvalidFrameKind(other)),
+        }
     }
 }
 

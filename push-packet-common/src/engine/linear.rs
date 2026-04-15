@@ -61,6 +61,16 @@ pub struct Ipv4Rule {
     pub flags: u8,
     pub action: Action,
     pub protocol: Protocol,
+    pub _pad: u8,
+}
+
+impl RuleExt for Ipv4Rule {
+    fn flags(&self) -> &u8 {
+        &self.flags
+    }
+    fn flags_mut(&mut self) -> &mut u8 {
+        &mut self.flags
+    }
 }
 
 #[repr(C)]
@@ -78,31 +88,24 @@ pub struct Ipv6Rule {
     pub flags: u8,
     pub action: Action,
     pub protocol: Protocol,
+    pub _pad: u8,
+}
+
+impl RuleExt for Ipv6Rule {
+    fn flags(&self) -> &u8 {
+        &self.flags
+    }
+    fn flags_mut(&mut self) -> &mut u8 {
+        &mut self.flags
+    }
 }
 
 #[cfg(feature = "user")]
 mod pod {
     use aya::Pod;
 
-    use crate::engine::linear::{Ipv4Rule, Ipv6Rule, RuleExt};
+    use crate::engine::linear::{Ipv4Rule, Ipv6Rule};
 
     unsafe impl Pod for Ipv4Rule {}
-    impl RuleExt for Ipv4Rule {
-        fn flags(&self) -> &u8 {
-            &self.flags
-        }
-        fn flags_mut(&mut self) -> &mut u8 {
-            &mut self.flags
-        }
-    }
-
     unsafe impl Pod for Ipv6Rule {}
-    impl RuleExt for Ipv6Rule {
-        fn flags(&self) -> &u8 {
-            &self.flags
-        }
-        fn flags_mut(&mut self) -> &mut u8 {
-            &mut self.flags
-        }
-    }
 }

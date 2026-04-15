@@ -4,10 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-push-packet-common = { path = "../push-packet-common" }
+push-packet-common = { path = "../push-packet-common", features=["linear"] }
 
 aya-ebpf = { workspace = true }
 aya-log-ebpf = { workspace = true }
+network-types = "0.1.0"
 
 [build-dependencies]
 which = { workspace = true }

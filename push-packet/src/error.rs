@@ -26,6 +26,12 @@ pub enum Error {
     MissingEbpfMap,
     #[error("missing eBPF program")]
     MissingEbpfProgram,
+    #[error("invalid frame kind: {0}")]
+    InvalidFrameKind(u32),
+    #[error("no ringbuf has been allocated")]
+    MissingRingBuf,
+    #[error("the eBPF program has not been started")]
+    ProgramNotRunning,
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
     #[error(transparent)]

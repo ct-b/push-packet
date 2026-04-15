@@ -11,7 +11,7 @@ push-packet-common = { path = "../push-packet-common", features = ["user"] }
 aya = { workspace = true }
 ipnet = { workspace = true }
 thiserror = {workspace = true}
-nix = {workspace=true, features=["net"]}
+nix = {workspace=true, features=["net", "poll"]}
 
 [build-dependencies]
 aya-build = { workspace = true, optional = true }

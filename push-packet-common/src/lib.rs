@@ -1,6 +1,8 @@
 #![no_std]
 pub mod engine;
 
+pub const RING_BUF_NAME: &str = "PP_RING_BUF";
+
 /// Shared protocol, used for setting and executing filter rules
 #[non_exhaustive]
 #[repr(u8)]
@@ -24,3 +26,13 @@ pub enum Action {
     Copy = 2,
     Route = 3,
 }
+
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub enum FrameKind {
+    Eth = 0,
+    Ip = 1,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for FrameKind {}

@@ -11,7 +11,7 @@ push-packet-common = { path = "../push-packet-common", features = ["user"] }
 aya = { workspace = true }
 ipnet = { workspace = true }
 thiserror = {workspace = true}
-nix = {workspace=true, features=["net", "poll"]}
+nix = {workspace=true, features=["net", "poll", "sched"]}
 
 [build-dependencies]
 aya-build = { workspace = true, optional = true }
@@ -34,7 +34,7 @@ push-packet-ebpf = { path = "../push-packet-ebpf", optional=true }
 [features]
 default = ["linear"]
 linear = ["push-packet-common/linear"]
-build-ebpf = ["dep:aya-build", "dep:cargo_metadata", "dep:push-packet-ebpf"]
+build-ebpf = ["dep:aya-build", "dep:cargo_metadata", "dep:push-packet-ebpf", "dep:anyhow"]
 
 [lib]
 name = "push_packet"

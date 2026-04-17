@@ -11,18 +11,26 @@ use aya_ebpf::{
 };
 
 const ARGS_LEN: usize = core::mem::size_of::<CopyArgs>();
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CopyArgs {
     take: u32,
     rule_id: u32,
+    data_len: u32,
 }
 
 impl CopyArgs {
     #[inline(always)]
-    pub fn set(take: u32, rule_id: u32) -> Result<(), ()> {
+    pub fn set(take: u32, rule_id: u32, data_len: u32) -> Result<(), ()> {
         let ptr = COPY_ARGS.get_ptr_mut(0).ok_or(())?;
-        unsafe { *ptr = CopyArgs { take, rule_id } };
+        unsafe {
+            *ptr = CopyArgs {
+                take,
+                rule_id,
+                data_len,
+            }
+        };
         Ok(())
     }
 
@@ -33,7 +41,7 @@ impl CopyArgs {
 }
 
 #[map]
-pub static COPY_ARGS: PerCpuArray<CopyArgs> = PerCpuArray::pinned(1, 0);
+pub static COPY_ARGS: PerCpuArray<CopyArgs> = PerCpuArray::with_max_entries(1, 0);
 
 // Find the power of 2 >= n
 #[inline(always)]

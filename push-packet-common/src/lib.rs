@@ -28,7 +28,7 @@ pub enum Action {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum FrameKind {
     Eth = 0,
     Ip = 1,

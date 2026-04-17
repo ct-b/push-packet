@@ -1,6 +1,8 @@
 pub mod channels;
+pub mod constants;
 pub mod engine;
 pub mod error;
+pub mod events;
 pub mod filter;
 pub mod frame_kind;
 pub mod interface;
@@ -11,20 +13,18 @@ use aya::{
     maps::{Array, Map, MapData, ProgramArray, RingBuf},
     programs::{Xdp, XdpFlags},
 };
-use push_packet_common::{FrameKind, RING_BUF_NAME};
+pub use push_packet_common::FrameKind;
+use push_packet_common::RING_BUF_NAME;
 
 use crate::{
     channels::CopyRx,
+    constants::{COPY_PROGRAM_NAME, FRAME_KIND_MAP, JUMP_TABLE_NAME},
     engine::{Engine, linear::LinearEngine},
     error::Error,
     filter::Filter,
     interface::Interface,
     rules::{Action, Rule, RuleId},
 };
-
-const FRAME_KIND_MAP: &str = "FRAME_KIND_MAP";
-const COPY_PROGRAM_NAME: &str = "copy_packet";
-const JUMP_TABLE_NAME: &str = "JUMP_TABLE";
 
 pub struct Tap<E: Engine = LinearEngine> {
     interface: Interface,
@@ -33,6 +33,7 @@ pub struct Tap<E: Engine = LinearEngine> {
     ebpf: Option<Ebpf>,
     ring_buf: Option<CopyRx>,
     frame_kind: FrameKind,
+    jump_table: Option<ProgramArray<MapData>>,
 }
 
 impl Tap {
@@ -73,24 +74,36 @@ impl<E: Engine> Tap<E> {
             ebpf: None,
             ring_buf: None,
             frame_kind,
+            jump_table: None,
         })
     }
 
+    /// Returns the FrameKind for the selected interface
+    pub fn frame_kind(&self) -> FrameKind {
+        self.frame_kind
+    }
+
+    /// Returns a CopyRx for receiving data.
     pub fn copy_rx(&mut self) -> Result<CopyRx, Error> {
         self.ring_buf.take().ok_or(Error::MissingRingBuf)
     }
 
     fn init_ring_buf(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        let ring_buf = ebpf.take_map(RING_BUF_NAME).ok_or(Error::MissingEbpfMap)?;
-        let ring_buf = RingBuf::try_from(ring_buf)?;
-        self.ring_buf = Some(CopyRx {
-            ring_buf,
-            frame_kind: FrameKind::Ip,
-        });
+        let ring_buf: RingBuf<MapData> = Self::get_map_owned(RING_BUF_NAME, ebpf)?;
+        self.ring_buf = Some(CopyRx { ring_buf });
         Ok(())
     }
 
-    fn get_map_mut<'a, T>(&mut self, name: &str, ebpf: &'a mut Ebpf) -> Result<T, Error>
+    fn get_map_owned<T>(name: &str, ebpf: &mut Ebpf) -> Result<T, Error>
+    where
+        T: TryFrom<Map>,
+        T::Error: Into<Error>,
+    {
+        let map = ebpf.take_map(name).ok_or(Error::MissingEbpfMap)?;
+        T::try_from(map).map_err(Into::into)
+    }
+
+    fn get_map_mut<'a, T>(name: &str, ebpf: &'a mut Ebpf) -> Result<T, Error>
     where
         T: TryFrom<&'a mut Map>,
         T::Error: Into<Error>,
@@ -99,15 +112,16 @@ impl<E: Engine> Tap<E> {
         T::try_from(map).map_err(Into::into)
     }
 
-    fn load_xdp_program<'a>(name: &str, ebpf: &'a mut Ebpf) -> Result<&'a mut Xdp, Error> {
+    fn get_xdp_program<'a>(name: &str, ebpf: &'a mut Ebpf) -> Result<&'a mut Xdp, Error> {
         let program: &mut Xdp = ebpf
             .program_mut(name)
             .ok_or(Error::MissingEbpfProgram)?
             .try_into()?;
-        program.load()?;
         Ok(program)
     }
 
+    /// Starts the tap. This handles loading the eBPF programs, and optionally provisioning a
+    /// RingBuf and/or AF_XDP socket based on the applied Rules
     pub fn start(&mut self) -> Result<(), Error> {
         let mut loader = aya::EbpfLoader::new();
         for (name, size) in self.engine.map_capacities() {
@@ -125,21 +139,31 @@ impl<E: Engine> Tap<E> {
             }
             self.engine.add_rule(rule_id, rule, &mut ebpf)?;
         }
-        if copy_enabled {
-            let jump_table_info = {
-                let program = Self::load_xdp_program(COPY_PROGRAM_NAME, &mut ebpf)?;
-                program.info()?
-            };
-            let mut jump_table: ProgramArray<_> = self.get_map_mut(JUMP_TABLE_NAME, &mut ebpf)?;
-            jump_table.set(0, &jump_table_info.fd()?, 0)?;
-            self.init_ring_buf(&mut ebpf)?;
-        }
         let mut frame_kind: Array<&mut MapData, FrameKind> =
-            self.get_map_mut(FRAME_KIND_MAP, &mut ebpf)?;
+            Self::get_map_mut(FRAME_KIND_MAP, &mut ebpf)?;
         frame_kind.set(0, self.frame_kind, 0)?;
 
-        let program = Self::load_xdp_program(E::EBPF_PROGAM_NAME, &mut ebpf)?;
-        program.attach(self.interface.name(), XdpFlags::default())?;
+        // Load engine program
+        Self::get_xdp_program(E::EBPF_PROGAM_NAME, &mut ebpf)?.load()?;
+
+        if copy_enabled {
+            // Load copy program. The ordering of events here matters. All programs must be loaded
+            // before taking an owned map.
+            let fd = {
+                let program = Self::get_xdp_program(COPY_PROGRAM_NAME, &mut ebpf)?;
+                program.load()?;
+                program.info()?.fd()?
+            };
+            let mut jump_table: ProgramArray<_> = Self::get_map_owned(JUMP_TABLE_NAME, &mut ebpf)?;
+            jump_table.set(0, &fd, 0)?;
+            self.jump_table = Some(jump_table);
+            self.init_ring_buf(&mut ebpf)?;
+        }
+
+        // Attach engine program
+        Self::get_xdp_program(E::EBPF_PROGAM_NAME, &mut ebpf)?
+            .attach(self.interface.name(), XdpFlags::default())?;
+
         self.ebpf = Some(ebpf);
         Ok(())
     }

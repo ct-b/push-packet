@@ -16,6 +16,11 @@ impl Boundaries {
         }
         Ok((self.start + offset) as *const T)
     }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.end - self.start
+    }
 }
 
 pub trait ContextExt {

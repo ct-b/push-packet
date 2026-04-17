@@ -25,7 +25,7 @@ use push_packet_ebpf::{
 };
 
 #[map]
-static JUMP_TABLE: ProgramArray = ProgramArray::pinned(2, 0);
+static JUMP_TABLE: ProgramArray = ProgramArray::with_max_entries(2, 0);
 
 #[btf_map]
 static LINEAR_MAP_V4: Array<Ipv4Rule, CAPACITY> = Array::new();
@@ -77,7 +77,7 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
     let src_addr = u32::from_be_bytes(hdr.src_addr);
     let dst_addr = u32::from_be_bytes(hdr.dst_addr);
     let proto = hdr.proto;
-    let ip_hdr_len = (hdr.ihl() as usize) * 4;
+    let ip_hdr_len = hdr.ihl() as usize;
 
     let transport_offset = offset + ip_hdr_len;
     let (src_port, dst_port) = match proto {
@@ -128,7 +128,7 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
             Action::Pass => Ok(xdp_action::XDP_PASS),
             Action::Drop => Ok(xdp_action::XDP_DROP),
             Action::Copy => {
-                CopyArgs::set(rule.take as u32, i as u32)?;
+                CopyArgs::set(rule.take as u32, i as u32, boundaries.len() as u32)?;
                 unsafe { JUMP_TABLE.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }
@@ -157,7 +157,7 @@ fn try_linear(ctx: XdpContext) -> Result<u32, ()> {
         }
         FrameKind::Ip => {
             let version: *const u16 = boundaries.ptr_at(0)?;
-            let version = (unsafe { *version } >> 12);
+            let version = (unsafe { u16::from_be(*version) } >> 12);
             match version {
                 4 => eval_ipv4_hdr(&ctx, &boundaries, 0),
                 6 => eval_ipv6_hdr(&ctx, &boundaries, 0),

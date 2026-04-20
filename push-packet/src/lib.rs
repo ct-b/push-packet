@@ -1,10 +1,35 @@
+#![deny(missing_docs)]
+#![deny(rustdoc::all)]
+#![deny(clippy::pedantic)]
+//! push-packet is a high-level, extensible packet routing library built on eBPF with aya. It is
+//! intended to be a simple, yet flexible foundation for traffic analysis applications and
+//! network-stack bypass.
+//!
+//! # Example: Tap into a network interface, and copy all packets to userspace.
+//! ```no_run
+//! # use push_packet::{Tap, rules::{Rule, Action}};
+//! # fn main() -> Result<(), push_packet::error::Error> {
+//! let mut tap = Tap::new("wlp3s0")?.with_rule(
+//!     Rule::builder()
+//!         .source_cidr("0.0.0.0/0")
+//!         .action(Action::Copy { take: None }),
+//! )?;
+//!
+//! tap.start()?;
+//!
+//! let mut rx = tap.copy_rx()?;
+//! while let Ok(event) = rx.recv() {
+//!     println!("Received packet of length {}", event.packet_len());
+//! }
+//! # Ok(())
+//! # }
+//! ```
 pub mod channels;
-pub mod constants;
+mod constants;
 pub mod engine;
 pub mod error;
 pub mod events;
-pub mod filter;
-pub mod frame_kind;
+mod filter;
 pub mod interface;
 pub mod rules;
 
@@ -17,7 +42,6 @@ pub use push_packet_common::FrameKind;
 use push_packet_common::RING_BUF_NAME;
 
 use crate::{
-    channels::CopyRx,
     constants::{COPY_PROGRAM_NAME, FRAME_KIND_MAP, JUMP_TABLE_NAME},
     engine::{Engine, linear::LinearEngine},
     error::Error,
@@ -26,40 +50,32 @@ use crate::{
     rules::{Action, Rule, RuleId},
 };
 
+/// Taps into a network interface. This struct stores all eBPF primitives required for the specific
+/// combination of [`Action`]s and the [`Engine`]. It defaults to using a [`LinearEngine`].
 pub struct Tap<E: Engine = LinearEngine> {
     interface: Interface,
     engine: E,
     filter: Filter,
     ebpf: Option<Ebpf>,
-    ring_buf: Option<CopyRx>,
+    copy_receiver: Option<channels::copy::Receiver>,
     frame_kind: FrameKind,
     jump_table: Option<ProgramArray<MapData>>,
 }
 
-impl Tap {
+impl Tap<LinearEngine> {
+    /// Creates a [`Tap`] with the default [`LinearEngine`].
     pub fn new<I>(interface: I) -> Result<Self, Error>
     where
         I: TryInto<Interface>,
         I::Error: Into<Error>,
     {
-        Self::new_with_engine(interface, LinearEngine::new(None))
+        Self::with_engine(interface, LinearEngine)
     }
 }
 
 impl<E: Engine> Tap<E> {
-    pub fn engine(&self) -> &E {
-        &self.engine
-    }
-    pub fn engine_mut(&mut self) -> &mut E {
-        &mut self.engine
-    }
-    pub fn ebpf(&self) -> Option<&Ebpf> {
-        self.ebpf.as_ref()
-    }
-    pub fn ebpf_mut(&mut self) -> Option<&mut Ebpf> {
-        self.ebpf.as_mut()
-    }
-    pub fn new_with_engine<I>(interface: I, engine: E) -> Result<Self, Error>
+    /// Creates a [`Tap`] with a specific engine.
+    pub fn with_engine<I>(interface: I, engine: E) -> Result<Self, Error>
     where
         I: TryInto<Interface>,
         I::Error: Into<Error>,
@@ -72,25 +88,25 @@ impl<E: Engine> Tap<E> {
             engine,
             filter,
             ebpf: None,
-            ring_buf: None,
+            copy_receiver: None,
             frame_kind,
             jump_table: None,
         })
     }
 
-    /// Returns the FrameKind for the selected interface
+    /// Returns the [`FrameKind`] for the selected interface
     pub fn frame_kind(&self) -> FrameKind {
         self.frame_kind
     }
 
-    /// Returns a CopyRx for receiving data.
-    pub fn copy_rx(&mut self) -> Result<CopyRx, Error> {
-        self.ring_buf.take().ok_or(Error::MissingRingBuf)
+    /// Returns a [`channels::copy::Receiver`] for receiving data.
+    pub fn copy_rx(&mut self) -> Result<channels::copy::Receiver, Error> {
+        self.copy_receiver.take().ok_or(Error::MissingRingBuf)
     }
 
-    fn init_ring_buf(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
+    fn init_copy_receiver(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
         let ring_buf: RingBuf<MapData> = Self::get_map_owned(RING_BUF_NAME, ebpf)?;
-        self.ring_buf = Some(CopyRx { ring_buf });
+        self.copy_receiver = Some(channels::copy::Receiver { ring_buf });
         Ok(())
     }
 
@@ -121,20 +137,17 @@ impl<E: Engine> Tap<E> {
     }
 
     /// Starts the tap. This handles loading the eBPF programs, and optionally provisioning a
-    /// RingBuf and/or AF_XDP socket based on the applied Rules
+    /// [`RingBuf`] and/or `AF_XDP` socket based on the applied [`Rule`]s.
     pub fn start(&mut self) -> Result<(), Error> {
         let mut loader = aya::EbpfLoader::new();
-        for (name, size) in self.engine.map_capacities() {
-            loader.map_max_entries(name, size);
-        }
         let mut ebpf = loader.load(E::EBPF_BYTES)?;
 
         let mut copy_enabled = false;
-        let mut route_enabled = false;
+        // let mut route_enabled = false;
         for (rule_id, rule) in self.filter.iter_rules() {
             match rule.action {
                 Action::Copy { .. } => copy_enabled = true,
-                Action::Route => route_enabled = true,
+                Action::Route => todo!("Add routing"),
                 _ => {}
             }
             self.engine.add_rule(rule_id, rule, &mut ebpf)?;
@@ -144,7 +157,7 @@ impl<E: Engine> Tap<E> {
         frame_kind.set(0, self.frame_kind, 0)?;
 
         // Load engine program
-        Self::get_xdp_program(E::EBPF_PROGAM_NAME, &mut ebpf)?.load()?;
+        Self::get_xdp_program(E::EBPF_PROGRAM_NAME, &mut ebpf)?.load()?;
 
         if copy_enabled {
             // Load copy program. The ordering of events here matters. All programs must be loaded
@@ -157,21 +170,21 @@ impl<E: Engine> Tap<E> {
             let mut jump_table: ProgramArray<_> = Self::get_map_owned(JUMP_TABLE_NAME, &mut ebpf)?;
             jump_table.set(0, &fd, 0)?;
             self.jump_table = Some(jump_table);
-            self.init_ring_buf(&mut ebpf)?;
+            self.init_copy_receiver(&mut ebpf)?;
         }
 
         // Attach engine program
-        Self::get_xdp_program(E::EBPF_PROGAM_NAME, &mut ebpf)?
+        Self::get_xdp_program(E::EBPF_PROGRAM_NAME, &mut ebpf)?
             .attach(self.interface.name(), XdpFlags::default())?;
 
         self.ebpf = Some(ebpf);
         Ok(())
     }
 
-    /// Chain a rule in a builder pattern. This returns a result as it accepts RuleBuilders in
-    /// addition to Rules.
+    /// Chain a rule in a builder pattern. This returns a [`Result`] as it accepts
+    /// [`RuleBuilder`](crate::rules::RuleBuilder)s in addition to [`Rule`]s.
     ///
-    /// This method should not be called after start().
+    /// This method should not be called after [`Self::start`].
     pub fn with_rule<R>(mut self, rule: R) -> Result<Self, Error>
     where
         R: TryInto<Rule>,
@@ -182,7 +195,7 @@ impl<E: Engine> Tap<E> {
         Ok(self)
     }
 
-    /// Add a Rule or RuleBuilder
+    /// Add a [`Rule`] or [`RuleBuilder`](crate::rules::RuleBuilder).
     pub fn add_rule<R>(&mut self, rule: R) -> Result<RuleId, Error>
     where
         R: TryInto<Rule>,
@@ -197,7 +210,7 @@ impl<E: Engine> Tap<E> {
         Ok(rule_id)
     }
 
-    /// Remove a Rule or RuleBuilder
+    /// Remove a [`Rule`] by its [`RuleId`].
     pub fn remove_rule(&mut self, rule_id: RuleId) -> Result<Rule, Error> {
         let rule = self.filter.get(rule_id).ok_or(Error::MissingRuleId)?;
         if let Some(ebpf) = &mut self.ebpf {

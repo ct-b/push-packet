@@ -1,3 +1,4 @@
+//! Defines the [`LinearEngine`]
 mod rules;
 use aya::{
     Ebpf, include_bytes_aligned,
@@ -11,18 +12,16 @@ use crate::{
     rules::{AddressFamily, Rule, RuleId},
 };
 
-pub struct LinearEngine {
-    capacity: usize,
-}
+/// The `LinearEngine` is a simple rule-matching engine that processes rules in order. It has a max
+/// capacity of [`CAPACITY`], but stops early based on the number of rules populated.
+#[derive(Default)]
+pub struct LinearEngine;
 
 impl LinearEngine {
+    /// Name of the ipv4 map
     const IP_V4_MAP_NAME: &'static str = "LINEAR_MAP_V4";
+    /// Name of the ipv6 map
     const IP_V6_MAP_NAME: &'static str = "LINEAR_MAP_V6";
-    pub fn new(capacity: Option<usize>) -> Self {
-        Self {
-            capacity: capacity.unwrap_or(CAPACITY),
-        }
-    }
 
     fn ipv4_map_mut(ebpf: &mut Ebpf) -> Result<Array<&mut MapData, Ipv4Rule>, Error> {
         let map = ebpf
@@ -64,21 +63,15 @@ impl LinearEngine {
 }
 
 impl Engine for LinearEngine {
-    const EBPF_PROGAM_NAME: &'static str = "linear";
+    const EBPF_PROGRAM_NAME: &'static str = "linear";
     #[cfg(feature = "build-ebpf")]
     const EBPF_BYTES: &'static [u8] = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/linear"));
 
-    fn map_capacities(&self) -> impl Iterator<Item = (&str, u32)> {
-        [
-            (Self::IP_V4_MAP_NAME, self.capacity as u32),
-            (Self::IP_V6_MAP_NAME, self.capacity as u32),
-        ]
-        .into_iter()
-    }
     #[cfg(not(feature = "build-ebpf"))]
     const EBPF_BYTES: &'static [u8] = include_bytes_aligned!("../../../ebpf-bin/linear");
+
     fn capacity(&self) -> Option<usize> {
-        Some(self.capacity)
+        Some(CAPACITY)
     }
 
     fn add_rule(&mut self, rule_id: RuleId, rule: &Rule, ebpf: &mut Ebpf) -> Result<(), Error> {

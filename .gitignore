@@ -10,3 +10,4 @@ target/
 
 # ignore nvim settings
 .vscode
+.nvim.lua

@@ -1,7 +1,9 @@
+//! Defines error variants.
 use std::{convert::Infallible, ffi::IntoStringError, num::TryFromIntError};
 
 use aya::{EbpfError, programs::ProgramError};
 
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid address")]
@@ -32,6 +34,10 @@ pub enum Error {
     MissingRingBuf,
     #[error("the eBPF program has not been started")]
     ProgramNotRunning,
+    #[error("the RingBufItem is not ready")]
+    NoRingBufItem,
+    #[error(transparent)]
+    NixError(#[from] nix::errno::Errno),
     #[error(transparent)]
     TryFromIntError(#[from] TryFromIntError),
     #[error(transparent)]

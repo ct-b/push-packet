@@ -36,3 +36,11 @@ pub enum FrameKind {
 
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for FrameKind {}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CopyArgs {
+    pub take: u32,
+    pub rule_id: u32,
+    pub packet_len: u32,
+}

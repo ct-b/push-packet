@@ -1,6 +1,6 @@
 use crate::rules::{Rule, RuleId};
 
-/// A simple interface for storing `Rule`s and getting the next available `RuleId` with id
+/// A simple interface for storing [`Rule`]s and getting the next available [`RuleId`] with id
 /// reclamation.
 #[derive(Default)]
 pub(crate) struct Filter {
@@ -47,10 +47,7 @@ impl Filter {
         self.rules
             .iter()
             .enumerate()
-            .filter_map(|(index, rule)| match rule {
-                None => None,
-                Some(rule) => Some((RuleId(index), rule)),
-            })
+            .filter_map(|(index, rule)| rule.as_ref().map(|rule| (RuleId(index), rule)))
     }
 }
 

@@ -31,6 +31,9 @@ anyhow = { workspace = true, default-features = true, optional=true }
 # features.
 push-packet-ebpf = { path = "../push-packet-ebpf", optional=true }
 
+[dev-dependencies]
+serial_test = "3.4.0"
+
 [features]
 default = ["linear"]
 linear = ["push-packet-common/linear"]

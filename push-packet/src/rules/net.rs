@@ -1,5 +1,6 @@
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
 use crate::error::Error;
 
@@ -9,10 +10,10 @@ pub trait IntoIpNet {
 
 impl IntoIpNet for &str {
     fn into_ip_net(self) -> Result<IpNet, Error> {
-        if !self.contains("/") {
+        if !self.contains('/') {
             return self
                 .parse::<IpAddr>()
-                .map(|ip| ip.into())
+                .map(std::convert::Into::into)
                 .map_err(Into::into);
         }
         self.parse::<IpNet>().map_err(Into::into)
@@ -58,14 +59,14 @@ mod tests {
     #[test]
     fn parse_bare_ipv4() {
         let test = "127.0.0.1".into_ip_net().unwrap();
-        let control = IpNet::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 32).unwrap();
+        let control = IpNet::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 32).unwrap();
         assert_eq!(test, control);
     }
 
     #[test]
     fn parse_ipv4_cidr() {
         let test = "127.0.0.1/16".into_ip_net().unwrap();
-        let control = IpNet::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 16).unwrap();
+        let control = IpNet::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 16).unwrap();
         assert_eq!(test, control);
     }
 
@@ -101,7 +102,7 @@ mod tests {
             "notanip"
                 .into_ip_net()
                 .is_err_and(|e| matches!(e, Error::InvalidAddress(_)))
-        )
+        );
     }
 
     #[test]
@@ -110,6 +111,6 @@ mod tests {
             "not/an/ip"
                 .into_ip_net()
                 .is_err_and(|e| matches!(e, Error::InvalidNetAddress(_)))
-        )
+        );
     }
 }

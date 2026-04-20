@@ -48,28 +48,35 @@ pub trait RuleExt {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct Ipv4Rule {
-    pub source_cidr: u32,
-    pub destination_cidr: u32,
+pub struct RuleCommon {
     pub source_port_min: u16,
     pub source_port_max: u16,
     pub destination_port_min: u16,
     pub destination_port_max: u16,
-    pub take: u16,
+    pub take: u32,
     pub source_prefix_len: u8,
     pub destination_prefix_len: u8,
     pub flags: u8,
     pub action: Action,
     pub protocol: Protocol,
-    pub _pad: u8,
+    // Padded to 20 bytes for eBPF map layout
+    pub _pad: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Ipv4Rule {
+    pub source_cidr: u32,
+    pub destination_cidr: u32,
+    pub common: RuleCommon,
 }
 
 impl RuleExt for Ipv4Rule {
     fn flags(&self) -> &u8 {
-        &self.flags
+        &self.common.flags
     }
     fn flags_mut(&mut self) -> &mut u8 {
-        &mut self.flags
+        &mut self.common.flags
     }
 }
 
@@ -78,25 +85,15 @@ impl RuleExt for Ipv4Rule {
 pub struct Ipv6Rule {
     pub source_cidr: [u8; 16],
     pub destination_cidr: [u8; 16],
-    pub source_port_min: u16,
-    pub source_port_max: u16,
-    pub destination_port_min: u16,
-    pub destination_port_max: u16,
-    pub take: u16,
-    pub source_prefix_len: u8,
-    pub destination_prefix_len: u8,
-    pub flags: u8,
-    pub action: Action,
-    pub protocol: Protocol,
-    pub _pad: u8,
+    pub common: RuleCommon,
 }
 
 impl RuleExt for Ipv6Rule {
     fn flags(&self) -> &u8 {
-        &self.flags
+        &self.common.flags
     }
     fn flags_mut(&mut self) -> &mut u8 {
-        &mut self.flags
+        &mut self.common.flags
     }
 }
 

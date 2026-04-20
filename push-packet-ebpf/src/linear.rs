@@ -15,11 +15,11 @@ use network_types::{
     ip::{IpProto, Ipv4Hdr},
 };
 use push_packet_common::{
-    Action, FrameKind,
+    Action, CopyArgs, FrameKind,
     engine::linear::{CAPACITY, Ipv4Rule, Ipv6Rule, RuleExt},
 };
 use push_packet_ebpf::{
-    CopyArgs,
+    CopyArgsExt,
     context_ext::{Boundaries, ContextExt},
     try_copy_packet,
 };
@@ -95,40 +95,43 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         let Some(rule) = LINEAR_MAP_V4.get(i as u32) else {
             continue;
         };
-        if rule.flags == 0 {
+        if rule.common.flags == 0 {
             continue;
         }
-        if rule.source_cidr_set() {
-            if !v4_cidr_match(src_addr, rule.source_cidr, rule.source_prefix_len) {
-                continue;
-            }
+        if rule.source_cidr_set()
+            && !v4_cidr_match(src_addr, rule.source_cidr, rule.common.source_prefix_len)
+        {
+            continue;
         }
-        if rule.destination_cidr_set() {
-            if !v4_cidr_match(dst_addr, rule.destination_cidr, rule.destination_prefix_len) {
-                continue;
-            }
+        if rule.destination_cidr_set()
+            && !v4_cidr_match(
+                dst_addr,
+                rule.destination_cidr,
+                rule.common.destination_prefix_len,
+            )
+        {
+            continue;
         }
-        if rule.protocol_set() {
-            if proto as u8 != rule.protocol as u8 {
-                continue;
-            }
+        if rule.protocol_set() && proto as u8 != rule.common.protocol as u8 {
+            continue;
         }
-        if rule.source_port_set() {
-            if src_port < rule.source_port_min || src_port > rule.source_port_max {
-                continue;
-            }
+        if rule.source_port_set()
+            && (src_port < rule.common.source_port_min || src_port > rule.common.source_port_max)
+        {
+            continue;
         }
 
-        if rule.destination_port_set() {
-            if dst_port < rule.destination_port_min || dst_port > rule.destination_port_max {
-                continue;
-            }
+        if rule.destination_port_set()
+            && (dst_port < rule.common.destination_port_min
+                || dst_port > rule.common.destination_port_max)
+        {
+            continue;
         }
-        return match rule.action {
+        return match rule.common.action {
             Action::Pass => Ok(xdp_action::XDP_PASS),
             Action::Drop => Ok(xdp_action::XDP_DROP),
             Action::Copy => {
-                CopyArgs::set(rule.take as u32, i as u32, boundaries.len() as u32)?;
+                CopyArgs::set(rule.common.take, i as u32, boundaries.len() as u32)?;
                 unsafe { JUMP_TABLE.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }

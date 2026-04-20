@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "push-packet",
     "push-packet-common",
-    "push-packet-ebpf", "tester",
+    "push-packet-ebpf", 
 ]
 default-members = ["push-packet", "push-packet-common"]
 

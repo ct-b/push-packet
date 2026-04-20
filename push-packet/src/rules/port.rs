@@ -33,7 +33,7 @@ mod tests {
     fn single_port() {
         let test = converter(20);
         let control = 20..=20;
-        assert_eq!(test, control)
+        assert_eq!(test, control);
     }
 
     #[test]
@@ -47,6 +47,6 @@ mod tests {
     fn test_range() {
         let test = converter(0..20);
         let control = 0..=19;
-        assert_eq!(test, control)
+        assert_eq!(test, control);
     }
 }

@@ -1,4 +1,6 @@
 #![no_std]
+#![allow(clippy::result_unit_err)]
+#![allow(clippy::len_without_is_empty)]
 
 pub mod context_ext;
 
@@ -9,34 +11,35 @@ use aya_ebpf::{
     maps::{PerCpuArray, RingBuf},
     programs::XdpContext,
 };
+use push_packet_common::CopyArgs;
 
 const ARGS_LEN: usize = core::mem::size_of::<CopyArgs>();
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct CopyArgs {
-    take: u32,
-    rule_id: u32,
-    data_len: u32,
+pub trait CopyArgsExt
+where
+    Self: Sized,
+{
+    fn set(take: u32, rule_id: u32, packet_len: u32) -> Result<(), ()>;
+    fn get() -> Result<Self, ()>;
 }
 
-impl CopyArgs {
+impl CopyArgsExt for CopyArgs {
     #[inline(always)]
-    pub fn set(take: u32, rule_id: u32, data_len: u32) -> Result<(), ()> {
+    fn set(take: u32, rule_id: u32, packet_len: u32) -> Result<(), ()> {
         let ptr = COPY_ARGS.get_ptr_mut(0).ok_or(())?;
         unsafe {
             *ptr = CopyArgs {
                 take,
                 rule_id,
-                data_len,
+                packet_len,
             }
         };
         Ok(())
     }
 
     #[inline(always)]
-    pub fn get() -> Result<Self, ()> {
-        COPY_ARGS.get(0).ok_or(()).map(|&s| s)
+    fn get() -> Result<Self, ()> {
+        COPY_ARGS.get(0).ok_or(()).copied()
     }
 }
 

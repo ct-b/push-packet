@@ -31,6 +31,7 @@ pub struct VethHarness {
     v2: String,
 }
 
+#[allow(dead_code)]
 impl VethHarness {
     const PREFIX: &str = "pp-test";
     const V1_IP: &str = "10.0.2.1";

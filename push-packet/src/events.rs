@@ -50,7 +50,8 @@ fn parse_data_len(data: &[u8]) -> u32 {
 }
 
 fn parse_data(data: &[u8]) -> &[u8] {
-    &data[12..(12 + parse_data_len(data) as usize)]
+    let header_len = core::mem::size_of::<CopyArgs>();
+    &data[header_len..(header_len + parse_data_len(data) as usize)]
 }
 
 impl CopyEvent<'_> {

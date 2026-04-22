@@ -36,6 +36,16 @@ pub enum Error {
     ProgramNotRunning,
     #[error("the RingBufItem is not ready")]
     NoRingBufItem,
+    #[error("the channel has disconnected")]
+    ChannelDisconnected,
+    #[error(
+        "to dynamically add Copy rules, use a Copy rule before Tap::start() or use TapConfig::with_copy"
+    )]
+    CopyNotEnabled,
+    #[error(
+        "to dynamically add Route rules, use a Route rule before Tap::start() or use TapConfig::with_copy"
+    )]
+    RouteNotEnabled,
     #[error(transparent)]
     NixError(#[from] nix::errno::Errno),
     #[error(transparent)]

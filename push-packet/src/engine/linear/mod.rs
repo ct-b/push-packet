@@ -1,34 +1,38 @@
 //! Defines the [`LinearEngine`]
 mod rules;
-use aya::{
-    Ebpf, include_bytes_aligned,
-    maps::{Array, MapData},
-};
+use aya::{Ebpf, include_bytes_aligned};
 use push_packet_common::engine::linear::{CAPACITY, Ipv4Rule, Ipv6Rule};
 
 use crate::{
+    ebpf::{array_mut, clear_array, set_array},
     engine::Engine,
     error::Error,
     rules::{AddressFamily, Rule, RuleId},
 };
 
+/// Name of the ipv4 map
+const IP_V4_MAP: &str = "LINEAR_MAP_V4";
+/// Name of the ipv6 map
+const IP_V6_MAP: &str = "LINEAR_MAP_V6";
+/// Name of the rule count map
+const RULE_COUNT_MAP: &str = "LINEAR_RULE_COUNT";
+
 /// The `LinearEngine` is a simple rule-matching engine that processes rules in order. It has a max
 /// capacity of [`CAPACITY`], but stops early based on the number of rules populated.
 #[derive(Default)]
-pub struct LinearEngine;
+pub struct LinearEngine {
+    v4_count: usize,
+    v6_count: usize,
+}
 
 impl LinearEngine {
-    /// Name of the ipv4 map
-    const IP_V4_MAP_NAME: &'static str = "LINEAR_MAP_V4";
-    /// Name of the ipv6 map
-    const IP_V6_MAP_NAME: &'static str = "LINEAR_MAP_V6";
-
-    fn ipv4_map_mut(ebpf: &mut Ebpf) -> Result<Array<&mut MapData, Ipv4Rule>, Error> {
-        let map = ebpf
-            .map_mut(Self::IP_V4_MAP_NAME)
-            .ok_or(Error::MissingEbpfMap)?;
-        let map = Array::try_from(map)?;
-        Ok(map)
+    fn update_counts(&self, ebpf: &mut Ebpf) -> Result<(), Error> {
+        let v4_count: u32 = self.v4_count.try_into()?;
+        let v6_count: u32 = self.v6_count.try_into()?;
+        let mut map = array_mut(ebpf, RULE_COUNT_MAP)?;
+        map.set(0, v4_count, 0)?;
+        map.set(1, v6_count, 0)?;
+        Ok(())
     }
 
     fn add_ipv4_rule(
@@ -38,16 +42,9 @@ impl LinearEngine {
         ebpf: &mut Ebpf,
     ) -> Result<(), Error> {
         let rule: Ipv4Rule = rule.into();
-        Self::ipv4_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, rule, 0)?;
-        Ok(())
-    }
-
-    fn ipv6_map_mut(ebpf: &mut Ebpf) -> Result<Array<&mut MapData, Ipv6Rule>, Error> {
-        let map = ebpf
-            .map_mut(Self::IP_V6_MAP_NAME)
-            .ok_or(Error::MissingEbpfMap)?;
-        let map = Array::try_from(map)?;
-        Ok(map)
+        set_array(ebpf, IP_V4_MAP, u32::try_from(rule_id.0)?, rule)?;
+        self.v4_count = self.v4_count.max(rule_id.0 + 1);
+        self.update_counts(ebpf)
     }
 
     fn add_ipv6_rule(
@@ -57,8 +54,9 @@ impl LinearEngine {
         ebpf: &mut Ebpf,
     ) -> Result<(), Error> {
         let rule: Ipv6Rule = rule.into();
-        Self::ipv6_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, rule, 0)?;
-        Ok(())
+        set_array(ebpf, IP_V6_MAP, u32::try_from(rule_id.0)?, rule)?;
+        self.v6_count = self.v6_count.max(rule_id.0 + 1);
+        self.update_counts(ebpf)
     }
 }
 
@@ -74,6 +72,10 @@ impl Engine for LinearEngine {
         Some(CAPACITY)
     }
 
+    fn init(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
+        self.update_counts(ebpf)
+    }
+
     fn add_rule(&mut self, rule_id: RuleId, rule: &Rule, ebpf: &mut Ebpf) -> Result<(), Error> {
         match rule.address_family() {
             AddressFamily::Ipv4 => self.add_ipv4_rule(rule_id, rule, ebpf),
@@ -87,16 +89,13 @@ impl Engine for LinearEngine {
     }
 
     fn remove_rule(&mut self, rule_id: RuleId, rule: &Rule, ebpf: &mut Ebpf) -> Result<(), Error> {
+        let rule_id: u32 = rule_id.0.try_into()?;
         match rule.address_family() {
-            AddressFamily::Ipv4 => {
-                Self::ipv4_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, Ipv4Rule::default(), 0)?;
-            }
-            AddressFamily::Ipv6 => {
-                Self::ipv6_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, Ipv6Rule::default(), 0)?;
-            }
+            AddressFamily::Ipv4 => clear_array::<Ipv4Rule>(ebpf, IP_V4_MAP, rule_id)?,
+            AddressFamily::Ipv6 => clear_array::<Ipv6Rule>(ebpf, IP_V6_MAP, rule_id)?,
             AddressFamily::Any => {
-                Self::ipv4_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, Ipv4Rule::default(), 0)?;
-                Self::ipv6_map_mut(ebpf)?.set(u32::try_from(rule_id.0)?, Ipv6Rule::default(), 0)?;
+                clear_array::<Ipv4Rule>(ebpf, IP_V4_MAP, rule_id)?;
+                clear_array::<Ipv6Rule>(ebpf, IP_V6_MAP, rule_id)?;
             }
         }
         Ok(())

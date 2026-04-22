@@ -13,6 +13,9 @@ pub struct Interface {
 
 impl Interface {
     /// Creates an interface from the name
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidInterfaceName`] if the name is invalid.
     pub fn from_name(name: &str) -> Result<Self, Error> {
         let index =
             if_nametoindex(name).map_err(|_| Error::InvalidInterfaceName(name.to_string()))?;
@@ -21,6 +24,10 @@ impl Interface {
     }
 
     /// Creates an interface from the index
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidInterfaceIndex`] if the index is invalid.
+    /// Returns [`Error::InvalidInterfaceName`] if the name is invalid.
     pub fn from_index(index: u32) -> Result<Self, Error> {
         let name = if_indextoname(index)
             .map_err(|_| Error::InvalidInterfaceIndex(index))?
@@ -46,6 +53,10 @@ impl Interface {
 
     /// Returns the interfaces [`FrameKind`]. This is needed because most interfaces receive
     /// ethernet frames, while wireguard interfaces receive IP frames.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidFrameKind`] if the [`FrameKind`] is not [`FrameKind::Eth`] or
+    /// [`FrameKind::Ip`].
     pub fn frame_kind(&self) -> Result<FrameKind, Error> {
         let value: u32 = std::fs::read_to_string(format!("/sys/class/net/{}/type", self.name))
             .unwrap_or_default()

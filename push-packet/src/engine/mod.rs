@@ -18,10 +18,25 @@ pub trait Engine {
     /// The eBPF program name
     const EBPF_PROGRAM_NAME: &'static str;
 
+    /// Initialize map values specific to the engine. This is called by [`crate::tap::Tap`] after
+    /// adding rules.
+    ///
+    /// # Errors
+    /// Returns an error if the engine cannot be initialized.
+    fn init(&mut self, ebpf: &mut Ebpf) -> Result<(), Error>;
+
     /// If this engnine is limited in max capacity, return the capcacity
     fn capacity(&self) -> Option<usize>;
     /// Add a rule to the engine
+    ///
+    /// # Errors
+    /// Returns [`Error::EngineAtCapacity`] if the engine cannot accept additional rules.
+    /// Returns additional errors depending on the engine implementation.
     fn add_rule(&mut self, rule_id: RuleId, rule: &Rule, ebpf: &mut Ebpf) -> Result<(), Error>;
     /// Remove a rule from the engine
+    ///
+    /// # Errors
+    /// Returns [`Error::MissingRuleId`] if the rule id is not present in the filter.
+    /// Returns additional errors depending on the engine implementation.
     fn remove_rule(&mut self, rule_id: RuleId, rule: &Rule, ebpf: &mut Ebpf) -> Result<(), Error>;
 }

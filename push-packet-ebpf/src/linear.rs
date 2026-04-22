@@ -12,7 +12,7 @@ use aya_ebpf::{
 };
 use network_types::{
     eth::{EthHdr, EtherType},
-    ip::{IpProto, Ipv4Hdr},
+    ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
 };
 use push_packet_common::{
     Action, CopyArgs, FrameKind,
@@ -36,6 +36,9 @@ static LINEAR_MAP_V6: Array<Ipv6Rule, CAPACITY> = Array::new();
 #[btf_map]
 static FRAME_KIND_MAP: Array<FrameKind, 1> = Array::new();
 
+#[btf_map]
+static LINEAR_RULE_COUNT: Array<u32, 2> = Array::new();
+
 #[xdp]
 pub fn copy_packet(ctx: XdpContext) -> u32 {
     match try_copy_packet(ctx) {
@@ -53,21 +56,40 @@ pub fn linear(ctx: XdpContext) -> u32 {
 }
 
 #[inline(always)]
-fn eval_ipv6_hdr(
-    _context: &XdpContext,
-    _boundaries: &Boundaries,
-    _offset: usize,
-) -> Result<u32, ()> {
-    Ok(xdp_action::XDP_PASS)
-}
-
-#[inline(always)]
 fn v4_cidr_match(address: u32, rule_address: u32, prefix_len: u8) -> bool {
     if prefix_len == 0 {
         return true;
     }
     let mask = !0 << (32 - prefix_len);
     (address & mask) == (rule_address & mask)
+}
+
+#[inline(always)]
+fn v6_cidr_match(address: [u8; 16], rule_address: [u8; 16], prefix_len: u8) -> bool {
+    if prefix_len == 0 {
+        return true;
+    }
+    let bytes = (prefix_len / 8) as usize;
+    let bits = prefix_len % 8;
+    const MAX_BYTES: usize = 16;
+    let bytes = MAX_BYTES.min(bytes);
+    for i in 0..bytes {
+        if i >= bytes {
+            break;
+        }
+        if address[i] != rule_address[i] {
+            return false;
+        }
+    }
+    if bits > 0 {
+        // Satisfy verifier
+        let index = bytes & 0xF;
+        let mask = 0xFFu8 << (8 - bits);
+        if (address[index] & mask) != (rule_address[index] & mask) {
+            return false;
+        }
+    }
+    true
 }
 
 #[inline(always)]
@@ -91,7 +113,13 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         _ => (0, 0),
     };
 
-    for i in 0..CAPACITY {
+    let count = LINEAR_RULE_COUNT
+        .get(0)
+        .copied()
+        .map(|c| c as usize)
+        .unwrap_or(CAPACITY);
+    let count = CAPACITY.min(count);
+    for i in 0..count {
         let Some(rule) = LINEAR_MAP_V4.get(i as u32) else {
             continue;
         };
@@ -105,6 +133,111 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         }
         if rule.destination_cidr_set()
             && !v4_cidr_match(
+                dst_addr,
+                rule.destination_cidr,
+                rule.common.destination_prefix_len,
+            )
+        {
+            continue;
+        }
+        if rule.protocol_set() && proto as u8 != rule.common.protocol as u8 {
+            continue;
+        }
+        if rule.source_port_set()
+            && (src_port < rule.common.source_port_min || src_port > rule.common.source_port_max)
+        {
+            continue;
+        }
+
+        if rule.destination_port_set()
+            && (dst_port < rule.common.destination_port_min
+                || dst_port > rule.common.destination_port_max)
+        {
+            continue;
+        }
+        return match rule.common.action {
+            Action::Pass => Ok(xdp_action::XDP_PASS),
+            Action::Drop => Ok(xdp_action::XDP_DROP),
+            Action::Copy => {
+                CopyArgs::set(rule.common.take, i as u32, boundaries.len() as u32)?;
+                unsafe { JUMP_TABLE.tail_call(context, 0).map_err(|_| ())? };
+                Ok(xdp_action::XDP_PASS)
+            }
+            Action::Route => Ok(xdp_action::XDP_PASS),
+            _ => Ok(xdp_action::XDP_PASS),
+        };
+    }
+    Ok(XDP_PASS)
+}
+
+#[repr(C)]
+struct Ipv6ExtHdr {
+    next_hdr: IpProto,
+    ext_len: u8,
+}
+
+#[inline(always)]
+fn parse_ipv6_proto(
+    hdr: &Ipv6Hdr,
+    boundaries: &Boundaries,
+    offset: usize,
+) -> Result<(IpProto, usize), ()> {
+    let mut next_proto = hdr.next_hdr;
+    let mut index = offset + Ipv6Hdr::LEN;
+
+    for _ in 0..8 {
+        match next_proto {
+            IpProto::HopOpt | IpProto::Ipv6Route | IpProto::Ipv6Opts => {
+                let ext_hdr: &Ipv6ExtHdr = unsafe { &*boundaries.ptr_at(index)? };
+                next_proto = ext_hdr.next_hdr;
+                index += (ext_hdr.ext_len as usize + 1) * 8;
+            }
+            IpProto::Ipv6Frag | IpProto::Esp => return Err(()),
+            _ => return Ok((next_proto, index)),
+        }
+    }
+    Err(())
+}
+
+#[inline(always)]
+fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -> Result<u32, ()> {
+    let hdr: *const Ipv6Hdr = boundaries.ptr_at(offset)?;
+    let hdr = unsafe { &*hdr };
+    let src_addr = hdr.src_addr;
+    let dst_addr = hdr.dst_addr;
+
+    let (proto, transport_offset) = parse_ipv6_proto(hdr, boundaries, offset)?;
+
+    let (src_port, dst_port) = match proto {
+        IpProto::Tcp | IpProto::Udp => {
+            let ports: *const [u16; 2] = boundaries.ptr_at(transport_offset)?;
+            let src_port = u16::from_be(unsafe { (*ports)[0] });
+            let dst_port = u16::from_be(unsafe { (*ports)[1] });
+            (src_port, dst_port)
+        }
+        _ => (0, 0),
+    };
+    let count = LINEAR_RULE_COUNT
+        .get(1)
+        .copied()
+        .map(|c| c as usize)
+        .unwrap_or(CAPACITY);
+    let count = CAPACITY.min(count);
+
+    for i in 0..count {
+        let Some(rule) = LINEAR_MAP_V6.get(i as u32) else {
+            continue;
+        };
+        if rule.common.flags == 0 {
+            continue;
+        }
+        if rule.source_cidr_set()
+            && !v6_cidr_match(src_addr, rule.source_cidr, rule.common.source_prefix_len)
+        {
+            continue;
+        }
+        if rule.destination_cidr_set()
+            && !v6_cidr_match(
                 dst_addr,
                 rule.destination_cidr,
                 rule.common.destination_prefix_len,

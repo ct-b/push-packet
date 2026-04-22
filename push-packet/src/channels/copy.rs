@@ -2,7 +2,10 @@
 use std::os::fd::AsFd;
 
 use aya::maps::{MapData, RingBuf};
-use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+use nix::{
+    errno::Errno,
+    poll::{PollFd, PollFlags, PollTimeout, poll},
+};
 
 use crate::{error::Error, events::CopyEvent};
 
@@ -15,6 +18,10 @@ pub struct Receiver {
 
 impl Receiver {
     /// Attempts to receive a [`CopyEvent`] without blocking.
+    ///
+    /// # Errors
+    /// Returns [`Error::NoRingBufItem`] if there is not a [`aya::maps::ring_buf::RingBufItem`]
+    /// available.
     pub fn try_recv(&mut self) -> Result<CopyEvent<'_>, Error> {
         self.ring_buf
             .next()
@@ -24,13 +31,31 @@ impl Receiver {
 
     fn poll(&self) -> Result<(), Error> {
         let mut poll_fd = [PollFd::new(self.ring_buf.as_fd(), PollFlags::POLLIN)];
-        match poll(&mut poll_fd, PollTimeout::NONE) {
-            Err(e) => Err(e.into()),
-            _ => Ok(()),
+        loop {
+            match poll(&mut poll_fd, PollTimeout::NONE) {
+                Ok(_) => {
+                    let revents = poll_fd[0].revents().unwrap_or(PollFlags::empty());
+                    if revents
+                        .intersects(PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL)
+                    {
+                        return Err(Error::ChannelDisconnected);
+                    }
+                    if revents.contains(PollFlags::POLLIN) {
+                        return Ok(());
+                    }
+                }
+                Err(Errno::EINTR) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
     }
 
     /// Blocks until a [`CopyEvent`] is available
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ChannelDisconnected`] if the connection is dropped.
+    /// Returns [`Error::NixError`] on unexpected nix errors.
     pub fn recv(&mut self) -> Result<CopyEvent<'_>, Error> {
         let ptr = &raw mut self.ring_buf;
         loop {

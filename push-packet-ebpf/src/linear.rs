@@ -25,7 +25,7 @@ use push_packet_ebpf::{
 };
 
 #[map]
-static JUMP_TABLE: ProgramArray = ProgramArray::with_max_entries(2, 0);
+static PROGRAM_ARRAY: ProgramArray = ProgramArray::with_max_entries(2, 0);
 
 #[btf_map]
 static LINEAR_MAP_V4: Array<Ipv4Rule, CAPACITY> = Array::new();
@@ -160,7 +160,7 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
             Action::Drop => Ok(xdp_action::XDP_DROP),
             Action::Copy => {
                 CopyArgs::set(rule.common.take, i as u32, boundaries.len() as u32)?;
-                unsafe { JUMP_TABLE.tail_call(context, 0).map_err(|_| ())? };
+                unsafe { PROGRAM_ARRAY.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }
             Action::Route => Ok(xdp_action::XDP_PASS),
@@ -265,7 +265,7 @@ fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
             Action::Drop => Ok(xdp_action::XDP_DROP),
             Action::Copy => {
                 CopyArgs::set(rule.common.take, i as u32, boundaries.len() as u32)?;
-                unsafe { JUMP_TABLE.tail_call(context, 0).map_err(|_| ())? };
+                unsafe { PROGRAM_ARRAY.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }
             Action::Route => Ok(xdp_action::XDP_PASS),

@@ -14,13 +14,14 @@ use crate::common::VethHarness;
 #[ignore]
 fn copy_packets() -> Result<(), Box<dyn std::error::Error>> {
     VethHarness::run(|harness| {
-        let mut tap = Tap::new(harness.veth_2())?.with_rule(
-            Rule::builder()
-                .source_cidr(harness.veth_1_ip())
-                .action(Action::Copy { take: None }),
-        )?;
-        tap.start()?;
-        let mut rx = tap.copy_rx()?;
+        let mut tap = Tap::builder(harness.veth_2())?
+            .rule(
+                Rule::builder()
+                    .source_cidr(harness.veth_1_ip())
+                    .action(Action::Copy { take: None }),
+            )?
+            .build()?;
+        let mut rx = tap.copy_receiver()?;
 
         let src = format!("{}:3000", harness.veth_1_ip());
         let dst = format!("{}:3000", harness.veth_2_ip());

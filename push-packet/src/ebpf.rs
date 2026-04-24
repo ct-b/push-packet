@@ -4,15 +4,34 @@ use aya::{
     programs::Xdp,
 };
 
-use crate::error::Error;
+use crate::{Loader, error::Error};
 
-pub(crate) fn map_mut<'a, T>(ebpf: &'a mut Ebpf, name: &str) -> Result<T, Error>
-where
-    T: TryFrom<&'a mut Map>,
-    T::Error: Into<Error>,
-{
-    let map = ebpf.map_mut(name).ok_or(Error::MissingEbpfMap)?;
-    T::try_from(map).map_err(Into::into)
+pub struct EbpfVar<T: Pod> {
+    value: T,
+    map: Array<MapData, T>,
+}
+
+impl<T: Pod> EbpfVar<T> {
+    pub fn update(&mut self, value: T) -> Result<(), Error> {
+        self.value = value;
+        self.map.set(0, value, 0)?;
+        Ok(())
+    }
+    pub fn get(&self) -> &T {
+        &self.value
+    }
+    pub fn new(ebpf: &mut Ebpf, name: &str, value: T) -> Result<Self, Error> {
+        let mut map = array_owned(ebpf, name)?;
+        map.set(0, value, 0)?;
+        Ok(Self { value, map })
+    }
+}
+
+impl<T: Pod> Loader for (T, &str) {
+    type Component = EbpfVar<T>;
+    fn load(self, ebpf: &mut Ebpf) -> Result<Self::Component, Error> {
+        EbpfVar::new(ebpf, self.1, self.0)
+    }
 }
 
 pub(crate) fn map_owned<T>(ebpf: &mut Ebpf, name: &str) -> Result<T, Error>
@@ -24,31 +43,8 @@ where
     T::try_from(map).map_err(Into::into)
 }
 
-pub(crate) fn array_mut<'a, T: Pod>(
-    ebpf: &'a mut Ebpf,
-    name: &str,
-) -> Result<Array<&'a mut MapData, T>, Error> {
-    map_mut(ebpf, name)
-}
-
-pub(crate) fn set_array<T: Pod>(
-    ebpf: &mut Ebpf,
-    name: &str,
-    index: u32,
-    value: T,
-) -> Result<(), Error> {
-    let mut map: Array<&mut MapData, T> = map_mut(ebpf, name)?;
-    map.set(index, value, 0)?;
-    Ok(())
-}
-
-pub(crate) fn clear_array<T: Pod + Default>(
-    ebpf: &mut Ebpf,
-    name: &str,
-    index: u32,
-) -> Result<(), Error> {
-    let mut map = array_mut(ebpf, name)?;
-    map.set(index, T::default(), 0).map_err(Into::into)
+pub(crate) fn array_owned<T: Pod>(ebpf: &mut Ebpf, name: &str) -> Result<Array<MapData, T>, Error> {
+    map_owned(ebpf, name)
 }
 
 pub(crate) fn xdp_program<'a>(ebpf: &'a mut Ebpf, name: &str) -> Result<&'a mut Xdp, Error> {

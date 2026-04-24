@@ -1,25 +1,178 @@
-use aya::{
-    Ebpf, EbpfLoader,
-    maps::{MapData, ProgramArray, RingBuf},
-};
-use push_packet_common::{FrameKind, RING_BUF_NAME};
+use aya::{Ebpf, EbpfLoader, programs::XdpFlags};
+use push_packet_common::FrameKind;
 
 use crate::{
-    channels,
-    ebpf::{map_owned, set_array, xdp_program},
+    channels::{self},
+    ebpf::{EbpfVar, xdp_program},
     engine::{Engine, linear::LinearEngine},
     error::Error,
     filter::Filter,
     interface::Interface,
-    rules::{self, Action, Rule, RuleId},
+    loader::Loader,
+    relay::{Relay, RelayLoader},
+    rules::{Action, Rule, RuleId},
 };
 
-mod config;
-pub use config::TapConfig;
-
 const FRAME_KIND_MAP: &str = "FRAME_KIND_MAP";
-const COPY_PROGRAM_NAME: &str = "copy_packet";
-const JUMP_TABLE_NAME: &str = "JUMP_TABLE";
+
+/// Optional configuration for copying packets.
+#[derive(Default)]
+pub struct CopyConfig {
+    pub(crate) ring_buf_size: Option<u32>,
+    pub(crate) force_enabled: bool,
+}
+
+impl CopyConfig {
+    /// Force the [`Tap`] to provision copy primitives, even if no rules use copy. Set this if you
+    /// want to dynamically add a rule with [`Action::Copy`] later.
+    #[must_use]
+    pub fn force_enabled(mut self) -> Self {
+        self.force_enabled = true;
+        self
+    }
+
+    /// Override the default ring buffer size.
+    #[must_use]
+    pub fn ring_buf_size(mut self, ring_buf_size: u32) -> Self {
+        self.ring_buf_size = Some(ring_buf_size);
+        self
+    }
+}
+
+/// Optional configuration for routing packets.
+#[derive(Default)]
+pub struct RouteConfig {
+    pub(crate) force_enabled: bool,
+}
+
+impl RouteConfig {
+    /// Force the [`Tap`] to provision route primitives, even if no rules use route. Set this if you
+    /// want to dynamically add a rule with [`Action::Route`] later.
+    #[must_use]
+    pub fn force_enabled(mut self) -> Self {
+        self.force_enabled = true;
+        self
+    }
+}
+
+/// Builder for a [`Tap`].
+pub struct TapBuilder<E: Engine = LinearEngine> {
+    interface: Interface,
+    frame_kind: FrameKind,
+    engine_loader: E::Loader,
+    filter: Filter,
+    xdp_flags: XdpFlags,
+    copy_config: CopyConfig,
+    route_config: RouteConfig,
+}
+
+impl<E: Engine> TapBuilder<E> {
+    /// Creates a new [`TapBuilder`] from the given interface name or number.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if the [`Interface`] is invalid, or uses an unsupported [`FrameKind`].
+    pub fn new<I>(interface: I) -> Result<Self, Error>
+    where
+        I: TryInto<Interface>,
+        I::Error: Into<Error>,
+    {
+        let interface = interface.try_into().map_err(Into::into)?;
+        let frame_kind = interface.frame_kind()?;
+        let engine_loader = E::Loader::default();
+        let filter = Filter::default();
+        let copy_config = CopyConfig::default();
+        let route_config = RouteConfig::default();
+        let xdp_flags = XdpFlags::default();
+
+        Ok(Self {
+            interface,
+            frame_kind,
+            engine_loader,
+            filter,
+            xdp_flags,
+            copy_config,
+            route_config,
+        })
+    }
+
+    /// Set the [`XdpFlags`].
+    #[must_use]
+    pub fn xdp_flags(mut self, xdp_flags: XdpFlags) -> Self {
+        self.xdp_flags = xdp_flags;
+        self
+    }
+
+    /// Set the [`CopyConfig`].
+    #[must_use]
+    pub fn copy_config(mut self, copy_config: CopyConfig) -> Self {
+        self.copy_config = copy_config;
+        self
+    }
+
+    /// Set the [`RouteConfig`].
+    #[must_use]
+    pub fn route_config(mut self, route_config: RouteConfig) -> Self {
+        self.route_config = route_config;
+        self
+    }
+
+    /// Chain a rule in a builder pattern.
+    ///
+    /// # Errors
+    /// Returns an [`Error`] if a provided [`crate::rules::RuleBuilder`] fails to build.
+    pub fn rule<R>(mut self, rule: R) -> Result<Self, Error>
+    where
+        R: TryInto<Rule>,
+        R::Error: Into<Error>,
+    {
+        let rule = rule.try_into().map_err(Into::into)?;
+        self.filter.add(rule);
+        Ok(self)
+    }
+
+    /// Builds the [`Tap`].
+    ///
+    /// # Errors
+    /// Returns an [`Error`] if any subcomponents fail to load or attach
+    pub fn build(self) -> Result<Tap<E>, Error> {
+        let Self {
+            interface,
+            frame_kind,
+            engine_loader,
+            filter,
+            xdp_flags,
+            copy_config,
+            route_config,
+        } = self;
+        let mut ebpf_loader = EbpfLoader::new();
+
+        let relay_loader = RelayLoader::new(&copy_config, &route_config, &filter);
+        relay_loader.configure(&mut ebpf_loader)?;
+        engine_loader.configure(&mut ebpf_loader)?;
+
+        let mut ebpf = ebpf_loader.load(E::EBPF_BYTES)?;
+        let mut engine = engine_loader.load(&mut ebpf)?;
+        let frame_kind = (frame_kind, FRAME_KIND_MAP).load(&mut ebpf)?;
+        let relay = relay_loader.load(&mut ebpf)?;
+
+        for (rule_id, rule) in filter.iter_rules() {
+            engine.add_rule(rule_id, rule)?;
+        }
+
+        let program = xdp_program(&mut ebpf, E::EBPF_PROGRAM_NAME)?;
+        program.attach(interface.name(), xdp_flags)?;
+
+        Ok(Tap {
+            interface,
+            engine,
+            filter,
+            ebpf,
+            frame_kind,
+            relay,
+        })
+    }
+}
 
 /// Taps into a network interface. This struct stores all eBPF primitives required for the specific
 /// combination of [`Action`]s and the [`Engine`]. It defaults to using a [`LinearEngine`].
@@ -27,179 +180,40 @@ pub struct Tap<E: Engine = LinearEngine> {
     interface: Interface,
     engine: E,
     filter: Filter,
-    ebpf: Option<Ebpf>,
-    copy_receiver: Option<channels::copy::Receiver>,
-    frame_kind: FrameKind,
-    jump_table: Option<ProgramArray<MapData>>,
-    config: TapConfig,
+    #[allow(unused)]
+    ebpf: Ebpf,
+    frame_kind: EbpfVar<FrameKind>,
+    relay: Relay,
 }
 
-impl Tap<LinearEngine> {
-    /// Creates a [`Tap`] with the default [`LinearEngine`].
+impl Tap {
+    /// Creates a new [`TapBuilder`] with the specified [`Interface`].
     ///
     /// # Errors
-    /// Returns an error if the [`Interface`] is invalid, or [`FrameKind`] cannot be determined.
-    pub fn new<I>(interface: I) -> Result<Self, Error>
+    ///
+    /// Returns [`Error::InvalidInterfaceName`] or [`Error::InvalidInterfaceIndex`] if the interface
+    /// is invalid.
+    pub fn builder<I>(interface: I) -> Result<TapBuilder, Error>
     where
         I: TryInto<Interface>,
         I::Error: Into<Error>,
     {
-        Self::with_engine(interface, LinearEngine::default())
+        TapBuilder::new(interface)
     }
 }
 
 impl<E: Engine> Tap<E> {
-    /// Creates a [`Tap`] with a specific engine.
-    ///
-    /// # Errors
-    /// Returns an error if the [`Interface`] is invalid, or [`FrameKind`] cannot be determined.
-    pub fn with_engine<I>(interface: I, engine: E) -> Result<Self, Error>
-    where
-        I: TryInto<Interface>,
-        I::Error: Into<Error>,
-    {
-        let interface = interface.try_into().map_err(Into::into)?;
-        let frame_kind = interface.frame_kind()?;
-        let filter = Filter::default();
-        Ok(Self {
-            interface,
-            engine,
-            filter,
-            ebpf: None,
-            copy_receiver: None,
-            frame_kind,
-            jump_table: None,
-            config: TapConfig::default(),
-        })
-    }
-
-    /// Sets [`TapConfig`] in a builder pattern
-    #[must_use]
-    pub fn with_config(mut self, config: TapConfig) -> Self {
-        self.config = config;
-        self
-    }
-
     /// Returns the [`FrameKind`] for the selected interface
     pub fn frame_kind(&self) -> FrameKind {
-        self.frame_kind
+        self.frame_kind.get().to_owned()
     }
 
     /// Returns a [`channels::copy::Receiver`] for receiving data.
     ///
     /// # Errors
-    /// Returns [`Error::MissingRingBuf`] if the [`RingBuf`] does not exist. This will happen if it
-    /// is accessed before calling [`Tap::start`].
-    pub fn copy_rx(&mut self) -> Result<channels::copy::Receiver, Error> {
-        self.copy_receiver.take().ok_or(Error::MissingRingBuf)
-    }
-
-    fn init_copy_receiver(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        let ring_buf: RingBuf<MapData> = map_owned(ebpf, RING_BUF_NAME)?;
-        self.copy_receiver = Some(channels::copy::Receiver { ring_buf });
-        Ok(())
-    }
-
-    fn update_config_from_rules(&mut self) {
-        for (_, rule) in self.filter.iter_rules() {
-            if self.config.copy_enabled && self.config.route_enabled {
-                break;
-            }
-            if !self.config.copy_enabled && matches!(rule.action, rules::Action::Copy { .. }) {
-                self.config.copy_enabled = true;
-            } else if !self.config.route_enabled && matches!(rule.action, rules::Action::Route) {
-                self.config.route_enabled = true;
-            }
-        }
-    }
-
-    fn load_ebpf(&self) -> Result<Ebpf, Error> {
-        let mut loader = EbpfLoader::new();
-
-        // Apply all map size overrides using TapConfig
-        if self.config.copy_enabled
-            && let Some(size) = self.config.ring_buf_size
-        {
-            loader.map_max_entries(RING_BUF_NAME, size);
-        }
-        let ebpf = loader.load(E::EBPF_BYTES)?;
-        Ok(ebpf)
-    }
-
-    fn populate_maps(&self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        set_array(ebpf, FRAME_KIND_MAP, 0, self.frame_kind)
-    }
-
-    fn load_programs(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        xdp_program(ebpf, E::EBPF_PROGRAM_NAME)?.load()?;
-        if self.config.copy_enabled || self.config.route_enabled {
-            if self.config.copy_enabled {
-                let fd = {
-                    let program = xdp_program(ebpf, COPY_PROGRAM_NAME)?;
-                    program.load()?;
-                    program.info()?.fd()?
-                };
-                let mut jump_table: ProgramArray<_> = map_owned(ebpf, JUMP_TABLE_NAME)?;
-                jump_table.set(0, &fd, 0)?;
-                self.jump_table = Some(jump_table);
-                self.init_copy_receiver(ebpf)?;
-            }
-
-            if self.config.route_enabled {
-                todo!();
-            }
-        }
-
-        Ok(())
-    }
-
-    fn attach(&self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        let program = xdp_program(ebpf, E::EBPF_PROGRAM_NAME)?;
-        program.attach(self.interface.name(), self.config.xdp_flags)?;
-        Ok(())
-    }
-
-    fn apply_rules(&mut self, ebpf: &mut Ebpf) -> Result<(), Error> {
-        for (rule_id, rule) in self.filter.iter_rules() {
-            self.engine.add_rule(rule_id, rule, ebpf)?;
-        }
-        Ok(())
-    }
-
-    /// Starts the tap. This handles loading the eBPF programs, and optionally provisioning a
-    /// [`RingBuf`] and/or `AF_XDP` socket based on the applied [`Rule`]s.
-    ///
-    /// # Errors
-    /// Returns various [`Error`]s if there are issues loading programs, populating maps, or
-    /// initializing the [`Engine`].
-    pub fn start(&mut self) -> Result<(), Error> {
-        self.update_config_from_rules();
-        let mut ebpf = self.load_ebpf()?;
-        self.populate_maps(&mut ebpf)?;
-        self.load_programs(&mut ebpf)?;
-        self.apply_rules(&mut ebpf)?;
-        self.engine.init(&mut ebpf)?;
-        self.attach(&mut ebpf)?;
-        self.ebpf = Some(ebpf);
-        Ok(())
-    }
-
-    /// Chain a rule in a builder pattern. This returns a [`Result`] as it accepts
-    /// [`RuleBuilder`](crate::rules::RuleBuilder)s in addition to [`Rule`]s.
-    ///
-    /// This method should not be called after [`Self::start`].
-    ///
-    /// # Errors
-    /// Returns [`Error::CopyNotEnabled`] or [`Error::RouteNotEnabled`] if the [`Tap`] hasn't
-    /// provisioned the required primitives.
-    /// Returns an [`Error`] if the engine cannot add the rule.
-    pub fn with_rule<R>(mut self, rule: R) -> Result<Self, Error>
-    where
-        R: TryInto<Rule>,
-        R::Error: Into<Error>,
-    {
-        self.add_rule(rule)?;
-        Ok(self)
+    /// Returns [`Error::MissingRingBuf`] if the [`aya::maps::RingBuf`] does not exist.
+    pub fn copy_receiver(&mut self) -> Result<channels::copy::Receiver, Error> {
+        self.relay.copy_receiver.take().ok_or(Error::MissingRingBuf)
     }
 
     /// Add a [`Rule`] or [`RuleBuilder`](crate::rules::RuleBuilder).
@@ -215,16 +229,16 @@ impl<E: Engine> Tap<E> {
     {
         let rule = rule.try_into().map_err(Into::into)?;
         let rule_id = self.filter.next_rule_id();
-        if let Some(ebpf) = &mut self.ebpf {
-            match rule.action {
-                Action::Copy { .. } if !self.config.copy_enabled => {
-                    return Err(Error::CopyNotEnabled);
-                }
-                Action::Route if !self.config.route_enabled => return Err(Error::RouteNotEnabled),
-                _ => {}
+        match rule.action {
+            Action::Copy { .. } if !self.relay.copy_enabled => {
+                return Err(Error::CopyNotEnabled);
             }
-            self.engine.add_rule(rule_id, &rule, ebpf)?;
+            Action::Route if !self.relay.route_enabled => {
+                return Err(Error::RouteNotEnabled);
+            }
+            _ => {}
         }
+        self.engine.add_rule(rule_id, &rule)?;
         self.filter.add(rule);
         Ok(rule_id)
     }
@@ -236,9 +250,12 @@ impl<E: Engine> Tap<E> {
     /// Returns an error if the [`Engine`] cannot remove the rule.
     pub fn remove_rule(&mut self, rule_id: RuleId) -> Result<Rule, Error> {
         let rule = self.filter.get(rule_id).ok_or(Error::MissingRuleId)?;
-        if let Some(ebpf) = &mut self.ebpf {
-            self.engine.remove_rule(rule_id, rule, ebpf)?;
-        }
+        self.engine.remove_rule(rule_id, rule)?;
         self.filter.remove(rule_id).ok_or(Error::MissingRuleId)
+    }
+
+    /// Access the [`Interface`]
+    pub fn interface(&self) -> &Interface {
+        &self.interface
     }
 }

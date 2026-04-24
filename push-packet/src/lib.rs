@@ -9,15 +9,15 @@
 //! ```no_run
 //! # use push_packet::{Tap, rules::{Rule, Action}};
 //! # fn main() -> Result<(), push_packet::Error> {
-//! let mut tap = Tap::new("wlp3s0")?.with_rule(
-//!     Rule::builder()
-//!         .source_cidr("0.0.0.0/0")
-//!         .action(Action::Copy { take: None }),
-//! )?;
+//! let mut tap = Tap::builder("wlp3s0")?
+//!     .rule(
+//!         Rule::builder()
+//!             .source_cidr("0.0.0.0/0")
+//!             .action(Action::Copy { take: None }),
+//!     )?
+//!     .build()?;
 //!
-//! tap.start()?;
-//!
-//! let mut rx = tap.copy_rx()?;
+//! let mut rx = tap.copy_receiver()?;
 //! while let Ok(event) = rx.recv() {
 //!     println!("Received packet of length {}", event.packet_len());
 //! }
@@ -25,10 +25,13 @@
 //! # }
 //! ```
 
+mod array_ext;
 mod ebpf;
 mod error;
 mod filter;
 mod interface;
+mod loader;
+mod relay;
 mod tap;
 
 pub mod channels;
@@ -38,4 +41,5 @@ pub mod rules;
 
 pub use error::Error;
 pub use interface::Interface;
-pub use tap::{Tap, TapConfig};
+pub use loader::Loader;
+pub use tap::{CopyConfig, RouteConfig, Tap, TapBuilder};

@@ -16,6 +16,12 @@ pub struct Receiver {
     pub(crate) ring_buf: RingBuf<MapData>,
 }
 
+impl From<RingBuf<MapData>> for Receiver {
+    fn from(value: RingBuf<MapData>) -> Self {
+        Self { ring_buf: value }
+    }
+}
+
 impl Receiver {
     /// Attempts to receive a [`CopyEvent`] without blocking.
     ///

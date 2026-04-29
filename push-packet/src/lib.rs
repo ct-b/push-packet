@@ -1,6 +1,8 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::all)]
 #![deny(clippy::pedantic)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(clippy::multiple_unsafe_ops_per_block)]
 //! push-packet is a high-level, extensible packet routing library built on eBPF with aya. It is
 //! intended to be a simple, yet flexible foundation for traffic analysis applications and
 //! network-stack bypass.
@@ -25,6 +27,7 @@
 //! # }
 //! ```
 
+mod af_xdp;
 mod array_ext;
 mod ebpf;
 mod error;

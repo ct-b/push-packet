@@ -2,12 +2,9 @@
 use std::os::fd::AsFd;
 
 use aya::maps::{MapData, RingBuf};
-use nix::{
-    errno::Errno,
-    poll::{PollFd, PollFlags, PollTimeout, poll},
-};
+use nix::poll::PollFlags;
 
-use crate::{error::Error, events::CopyEvent};
+use crate::{error::Error, events::copy::CopyEvent};
 
 /// A receiver that receives [`CopyEvent`]s from the underlying [`RingBuf`]. Note that
 /// [`CopyEvent`]s hold a reference to the underlying [`RingBuf`] and must be dropped to restore
@@ -35,27 +32,6 @@ impl Receiver {
             .ok_or(Error::NoRingBufItem)
     }
 
-    fn poll(&self) -> Result<(), Error> {
-        let mut poll_fd = [PollFd::new(self.ring_buf.as_fd(), PollFlags::POLLIN)];
-        loop {
-            match poll(&mut poll_fd, PollTimeout::NONE) {
-                Ok(_) => {
-                    let revents = poll_fd[0].revents().unwrap_or(PollFlags::empty());
-                    if revents
-                        .intersects(PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL)
-                    {
-                        return Err(Error::ChannelDisconnected);
-                    }
-                    if revents.contains(PollFlags::POLLIN) {
-                        return Ok(());
-                    }
-                }
-                Err(Errno::EINTR) => {}
-                Err(e) => return Err(e.into()),
-            }
-        }
-    }
-
     /// Blocks until a [`CopyEvent`] is available
     ///
     /// # Errors
@@ -69,7 +45,7 @@ impl Receiver {
             if let Some(item) = unsafe { (*ptr).next() } {
                 return Ok(item.into());
             }
-            self.poll()?;
+            crate::channels::poll::poll_fd(self.ring_buf.as_fd(), PollFlags::POLLIN)?;
         }
     }
 }

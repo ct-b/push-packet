@@ -1,5 +1,8 @@
+use std::num::NonZeroU32;
+
 use aya::{Ebpf, EbpfLoader, programs::XdpFlags};
 use push_packet_common::FrameKind;
+use xdpilone::{Socket, SocketConfig, Umem, UmemConfig};
 
 use crate::{
     channels::{self},
@@ -40,9 +43,36 @@ impl CopyConfig {
 }
 
 /// Optional configuration for routing packets.
-#[derive(Default)]
+///
+/// This [`Default`]s to the following sizes:
 pub struct RouteConfig {
     pub(crate) force_enabled: bool,
+    pub(crate) umem_config: UmemConfig,
+    pub(crate) socket_config: SocketConfig,
+    pub(crate) frame_count: u32,
+    pub(crate) queue_id: u32,
+}
+
+impl Default for RouteConfig {
+    fn default() -> Self {
+        Self {
+            force_enabled: false,
+            umem_config: UmemConfig {
+                fill_size: 2048,
+                complete_size: 2048,
+                frame_size: 4096,
+                headroom: 32,
+                flags: 0,
+            },
+            socket_config: SocketConfig {
+                rx_size: NonZeroU32::new(2048),
+                tx_size: NonZeroU32::new(2048),
+                bind_flags: SocketConfig::XDP_BIND_NEED_WAKEUP,
+            },
+            frame_count: 8192,
+            queue_id: 0,
+        }
+    }
 }
 
 impl RouteConfig {
@@ -51,6 +81,39 @@ impl RouteConfig {
     #[must_use]
     pub fn force_enabled(mut self) -> Self {
         self.force_enabled = true;
+        self
+    }
+
+    /// Overrides the default [`UmemConfig`] for the AF_XDP socket.
+    #[must_use]
+    pub fn umem_config(mut self, umem_config: UmemConfig) -> Self {
+        self.umem_config = umem_config;
+        self
+    }
+
+    /// Overrides the default [`SocketConfig`] for the AF_XDP socket.
+    #[must_use]
+    pub fn socket_config(mut self, socket_config: SocketConfig) -> Self {
+        self.socket_config = socket_config;
+        self
+    }
+    /// Sets the `frame_count` for the AF_XDP socket. Combined with the [`UmemConfig`] settings,
+    /// this will determine the total size of the Umem region.
+    #[must_use]
+    pub fn frame_count(mut self, frame_count: u32) -> Self {
+        self.frame_count = frame_count;
+        self
+    }
+
+    /// Sets the `queue_id` for the AF_XDP socket.
+    ///
+    /// # Note
+    /// The queue_id is likely not going to contain all of the traffic you expect unless you
+    /// specifially route traffic to that queue id, for example, using `ethtool`.
+    /// https://www.kernel.org/doc/html/latest/networking/af_xdp.html#faq
+    #[must_use]
+    pub fn queue_id(mut self, queue_id: u32) -> Self {
+        self.queue_id = queue_id;
         self
     }
 }
@@ -147,7 +210,7 @@ impl<E: Engine> TapBuilder<E> {
         } = self;
         let mut ebpf_loader = EbpfLoader::new();
 
-        let relay_loader = RelayLoader::new(&copy_config, &route_config, &filter);
+        let relay_loader = RelayLoader::new(copy_config, route_config, &filter, &interface);
         relay_loader.configure(&mut ebpf_loader)?;
         engine_loader.configure(&mut ebpf_loader)?;
 
@@ -206,6 +269,22 @@ impl<E: Engine> Tap<E> {
     /// Returns the [`FrameKind`] for the selected interface
     pub fn frame_kind(&self) -> FrameKind {
         self.frame_kind.get().to_owned()
+    }
+
+    /// Returns a tuple of [`channels::route::Sender`] and [`channels::route::Receiver`].
+    ///
+    /// # Errors
+    /// Returns [`Error::MissingRouteChannel`] if AF_XDP socket was not configured.
+    pub fn route_channel(
+        &mut self,
+    ) -> Result<(channels::route::Sender, channels::route::Receiver), Error> {
+        self.relay
+            .af_xdp_socket
+            .as_mut()
+            .ok_or(Error::MissingRouteCchannel)?
+            .channel
+            .take()
+            .ok_or(Error::MissingRouteCchannel)
     }
 
     /// Returns a [`channels::copy::Receiver`] for receiving data.

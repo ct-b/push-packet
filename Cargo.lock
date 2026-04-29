@@ -205,6 +205,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -469,12 +484,14 @@ dependencies = [
  "aya",
  "aya-build",
  "cargo_metadata",
+ "crossbeam-queue",
  "ipnet",
  "nix",
  "push-packet-common",
  "push-packet-ebpf",
  "serial_test",
  "thiserror",
+ "xdpilone",
 ]
 
 [[package]]
@@ -655,6 +672,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+
+[[package]]
 name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -811,6 +834,15 @@ name = "winsafe"
 version = "0.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
+
+[[package]]
+name = "xdpilone"
+version = "1.2.1"
+source = "git+https://github.com/197g/xdpilone?rev=b28a0b357949cccbc5ebe37094d21c0ff5c9b191#b28a0b357949cccbc5ebe37094d21c0ff5c9b191"
+dependencies = [
+ "libc",
+ "spin",
+]
 
 [[package]]
 name = "zmij"

@@ -15,13 +15,13 @@ use network_types::{
     ip::{IpProto, Ipv4Hdr, Ipv6Hdr},
 };
 use push_packet_common::{
-    Action, CopyArgs, FrameKind,
+    Action, CopyArgs, FrameKind, RouteArgs,
     engine::linear::{CAPACITY, Ipv4Rule, Ipv6Rule, RuleExt},
 };
 use push_packet_ebpf::{
-    CopyArgsExt,
+    args_ext::{CopyArgsExt, RouteArgsExt},
     context_ext::{Boundaries, ContextExt},
-    try_copy_packet,
+    try_copy_packet, try_route_packet,
 };
 
 #[map]
@@ -42,6 +42,14 @@ static LINEAR_RULE_COUNT: Array<u32, 2> = Array::new();
 #[xdp]
 pub fn copy_packet(ctx: XdpContext) -> u32 {
     match try_copy_packet(ctx) {
+        Ok(ret) => ret,
+        Err(_) => xdp_action::XDP_ABORTED,
+    }
+}
+
+#[xdp]
+pub fn route_packet(ctx: XdpContext) -> u32 {
+    match try_route_packet(ctx) {
         Ok(ret) => ret,
         Err(_) => xdp_action::XDP_ABORTED,
     }
@@ -163,7 +171,12 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
                 unsafe { PROGRAM_ARRAY.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }
-            Action::Route => Ok(xdp_action::XDP_PASS),
+            Action::Route => {
+                RouteArgs::set(i as u32)?;
+                unsafe { PROGRAM_ARRAY.tail_call(context, 1).map_err(|_| ())? };
+                Ok(xdp_action::XDP_PASS)
+            }
+
             _ => Ok(xdp_action::XDP_PASS),
         };
     }
@@ -268,7 +281,11 @@ fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
                 unsafe { PROGRAM_ARRAY.tail_call(context, 0).map_err(|_| ())? };
                 Ok(xdp_action::XDP_PASS)
             }
-            Action::Route => Ok(xdp_action::XDP_PASS),
+            Action::Route => {
+                RouteArgs::set(i as u32)?;
+                unsafe { PROGRAM_ARRAY.tail_call(context, 1).map_err(|_| ())? };
+                Ok(xdp_action::XDP_PASS)
+            }
             _ => Ok(xdp_action::XDP_PASS),
         };
     }

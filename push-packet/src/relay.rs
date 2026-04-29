@@ -5,7 +5,8 @@ use aya::{
 use push_packet_common::RING_BUF_NAME;
 
 use crate::{
-    Error,
+    Error, Interface,
+    af_xdp::{AfXdpSocket, AfXdpSocketLoader},
     channels::copy,
     ebpf::{map_owned, xdp_program},
     filter::Filter,
@@ -15,6 +16,7 @@ use crate::{
 };
 
 const COPY_PROGRAM_NAME: &str = "copy_packet";
+const ROUTE_PROGRAM_NAME: &str = "route_packet";
 const PROGRAM_ARRAY_NAME: &str = "PROGRAM_ARRAY";
 
 #[derive(Default)]
@@ -22,10 +24,16 @@ pub(crate) struct RelayLoader {
     copy_enabled: bool,
     route_enabled: bool,
     ring_buf_size: Option<u32>,
+    af_xdp_loader: Option<AfXdpSocketLoader>,
 }
 
 impl RelayLoader {
-    pub fn new(copy_config: &CopyConfig, route_config: &RouteConfig, filter: &Filter) -> Self {
+    pub fn new(
+        copy_config: CopyConfig,
+        route_config: RouteConfig,
+        filter: &Filter,
+        interface: &Interface,
+    ) -> Self {
         let mut copy_enabled = copy_config.force_enabled;
         let mut route_enabled = route_config.force_enabled;
         for (_, rule) in filter.iter_rules() {
@@ -39,10 +47,28 @@ impl RelayLoader {
             }
         }
 
+        let RouteConfig {
+            umem_config,
+            socket_config,
+            frame_count,
+            queue_id,
+            ..
+        } = route_config;
+
+        let af_xdp_loader = route_enabled.then(|| {
+            AfXdpSocketLoader::new(
+                umem_config,
+                socket_config,
+                frame_count,
+                interface.index(),
+                queue_id,
+            )
+        });
         Self {
             copy_enabled,
             route_enabled,
             ring_buf_size: copy_config.ring_buf_size,
+            af_xdp_loader,
         }
     }
 }
@@ -54,17 +80,16 @@ impl Loader for RelayLoader {
         if let Some(size) = self.ring_buf_size {
             ebpf_loader.map_max_entries(RING_BUF_NAME, size);
         }
+        if let Some(af_xdp_loader) = &self.af_xdp_loader {
+            af_xdp_loader.configure(ebpf_loader)?;
+        }
+        ebpf_loader.map_max_entries(PROGRAM_ARRAY_NAME, 2);
         Ok(())
     }
 
     fn load(self, ebpf: &mut Ebpf) -> Result<Self::Component, Error> {
         if !self.copy_enabled && !self.route_enabled {
-            return Ok(Relay {
-                copy_receiver: None,
-                program_array: None,
-                copy_enabled: false,
-                route_enabled: false,
-            });
+            return Ok(Relay::default());
         }
 
         let mut program_array: ProgramArray<_> = map_owned(ebpf, PROGRAM_ARRAY_NAME)?;
@@ -80,19 +105,34 @@ impl Loader for RelayLoader {
             None
         };
 
+        let af_xdp_socket = if self.route_enabled {
+            let program = xdp_program(ebpf, ROUTE_PROGRAM_NAME)?;
+            program.load()?;
+            program_array.set(1, program.fd()?, 0)?;
+            let loader = self
+                .af_xdp_loader
+                .expect("AfXdpSocketLoader must exist if route_enabled");
+            Some(loader.load(ebpf)?)
+        } else {
+            None
+        };
+
         Ok(Relay {
             copy_enabled: self.copy_enabled,
             route_enabled: self.route_enabled,
             program_array: Some(program_array),
             copy_receiver,
+            af_xdp_socket,
         })
     }
 }
 
+#[derive(Default)]
 pub(crate) struct Relay {
     pub copy_enabled: bool,
     pub route_enabled: bool,
     pub copy_receiver: Option<copy::Receiver>,
+    pub af_xdp_socket: Option<AfXdpSocket>,
     #[allow(unused)]
     pub program_array: Option<ProgramArray<MapData>>,
 }

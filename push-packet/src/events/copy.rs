@@ -1,4 +1,4 @@
-//! Defines events, such as when a packet is routed or copied to userspace.
+//! Defines events for [`crate::rules::Action::Copy`].
 use std::mem::offset_of;
 
 use aya::maps::ring_buf::RingBufItem;
@@ -153,7 +153,7 @@ impl OwnedCopyEvent {
 #[cfg(test)]
 mod tests {
     use crate::{
-        events::{parse_packet_len, parse_rule_id, parse_take},
+        events::copy::{parse_packet_len, parse_rule_id, parse_take},
         rules::RuleId,
     };
 

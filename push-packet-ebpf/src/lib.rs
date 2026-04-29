@@ -2,16 +2,22 @@
 #![allow(clippy::result_unit_err)]
 #![allow(clippy::len_without_is_empty)]
 
+pub mod args_ext;
 pub mod context_ext;
 
+use core::ops::Neg;
+
+use args_ext::CopyArgsExt;
 use aya_ebpf::{
     bindings::xdp_action,
-    helpers::generated::bpf_xdp_load_bytes,
+    helpers::generated::{bpf_xdp_adjust_meta, bpf_xdp_load_bytes},
     macros::map,
-    maps::{PerCpuArray, RingBuf},
+    maps::{PerCpuArray, RingBuf, XskMap},
     programs::XdpContext,
 };
-use push_packet_common::CopyArgs;
+use push_packet_common::{CopyArgs, RouteArgs};
+
+use crate::args_ext::RouteArgsExt;
 
 const ARGS_LEN: usize = core::mem::size_of::<CopyArgs>();
 const DEFAULT_RING_BUF_SIZE: u32 = 262144;
@@ -20,37 +26,17 @@ const DEFAULT_RING_BUF_SIZE: u32 = 262144;
 #[map]
 pub static COPY_ARGS: PerCpuArray<CopyArgs> = PerCpuArray::with_max_entries(1, 0);
 
+// Input parameters for the route program
+#[map]
+pub static ROUTE_ARGS: PerCpuArray<RouteArgs> = PerCpuArray::with_max_entries(1, 0);
+
 // Ring buf for copying packets to userspace
 #[map]
 static PP_RING_BUF: RingBuf = RingBuf::with_byte_size(DEFAULT_RING_BUF_SIZE, 0);
 
-pub trait CopyArgsExt
-where
-    Self: Sized,
-{
-    fn set(take: u32, rule_id: u32, packet_len: u32) -> Result<(), ()>;
-    fn get() -> Result<Self, ()>;
-}
-
-impl CopyArgsExt for CopyArgs {
-    #[inline(always)]
-    fn set(take: u32, rule_id: u32, packet_len: u32) -> Result<(), ()> {
-        let ptr = COPY_ARGS.get_ptr_mut(0).ok_or(())?;
-        unsafe {
-            *ptr = CopyArgs {
-                take,
-                rule_id,
-                packet_len,
-            }
-        };
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn get() -> Result<Self, ()> {
-        COPY_ARGS.get(0).ok_or(()).copied()
-    }
-}
+// XSK map for routing packets to userspace
+#[map]
+static XSK_MAP: XskMap = XskMap::with_max_entries(1, 0);
 
 // Find the power of 2 >= n
 #[inline(always)]
@@ -113,4 +99,25 @@ pub fn try_copy_packet(ctx: XdpContext) -> Result<u32, ()> {
         16384 => reserve_and_copy!(16384, copy_args, packet_len, ctx),
         _ => Ok(xdp_action::XDP_PASS),
     }
+}
+
+#[inline(always)]
+pub fn try_route_packet(ctx: XdpContext) -> Result<u32, ()> {
+    let route_args = RouteArgs::get()?;
+    let delta = (core::mem::size_of::<RouteArgs>() as i32).neg();
+    if unsafe { bpf_xdp_adjust_meta(ctx.ctx, delta) } != 0 {
+        return Err(());
+    };
+    let metadata = ctx.metadata();
+    let metadata_end = ctx.metadata_end();
+    if metadata + core::mem::size_of::<RouteArgs>() > metadata_end {
+        return Err(());
+    }
+
+    let metadata = metadata as *mut RouteArgs;
+
+    unsafe {
+        core::ptr::write(metadata, route_args);
+    };
+    Ok(XSK_MAP.redirect(0, 0).map_err(|_| ())?)
 }

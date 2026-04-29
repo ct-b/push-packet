@@ -12,6 +12,8 @@ aya = { workspace = true }
 ipnet = { workspace = true }
 thiserror = {workspace = true}
 nix = {workspace=true, features=["net", "poll", "sched"]}
+xdpilone = { git = "https://github.com/197g/xdpilone", rev = "b28a0b357949cccbc5ebe37094d21c0ff5c9b191" }
+crossbeam-queue = "0.3.12"
 
 [build-dependencies]
 aya-build = { workspace = true, optional = true }

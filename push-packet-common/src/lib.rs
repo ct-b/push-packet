@@ -44,3 +44,9 @@ pub struct CopyArgs {
     pub rule_id: u32,
     pub packet_len: u32,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RouteArgs {
+    pub rule_id: u32,
+}

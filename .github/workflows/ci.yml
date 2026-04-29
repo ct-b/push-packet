@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy, rust-src
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install bpf-linker --locked
+      - name: fmt
+        run: cargo +nightly fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --exclude push-packet-ebpf --all-targets --all-features -- -D warnings
+      - name: doc
+        run: cargo doc --workspace --exclude push-packet-ebpf --all-features --no-deps
+      - name: clippy-ebpf
+        working-directory: push-packet-ebpf
+        run: cargo +nightly clippy --target bpfel-unknown-none -Z build-std=core -- -D warnings

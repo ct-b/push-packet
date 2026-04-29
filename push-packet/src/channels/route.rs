@@ -59,7 +59,8 @@ impl Receiver {
 
     /// Blocks until a packet is available.
     /// This returns a [`RouteEvent`], which references the underlying memory. It should quickly be
-    /// dropped or converted into an [`OwnedRouteEvent`] to avoid frame starvation.
+    /// dropped or converted into an [`crate::events::route::OwnedRouteEvent`] to avoid frame
+    /// starvation.
     ///
     /// # Errors
     /// Returns [`Error::ChannelDisconnected`] if the channel is closed.
@@ -94,7 +95,8 @@ impl Receiver {
     }
     /// Attempts to receive a packet.
     /// This returns a [`RouteEvent`], which references the underlying memory. It should quickly be
-    /// dropped or converted into an [`OwnedRouteEvent`] to avoid frame starvation.
+    /// dropped or converted into an [`crate::events::route::OwnedRouteEvent`] to avoid frame
+    /// starvation.
     ///
     /// # Errors
     /// Returns [`Error::ChannelDisconnected`] if the channel is closed.

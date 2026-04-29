@@ -19,6 +19,7 @@ impl PacketBuffer {
     fn new(size: usize) -> Result<Self, Error> {
         let layout = Layout::from_size_align(size, 4096)
             .map_err(|_| Error::InvalidSize("buffer size invalid"))?;
+        // Safety: layout is non-zero
         let ptr = unsafe { alloc(layout) };
         let ptr = NonNull::new(ptr).ok_or(Error::NullPointer)?;
         Ok(Self(ptr, layout))
@@ -31,33 +32,42 @@ impl PacketBuffer {
 
 impl Drop for PacketBuffer {
     fn drop(&mut self) {
+        // Safety: ptr returned from alloc with this layout and hasn't been freed.
         unsafe { dealloc(self.0.as_ptr(), self.1) }
     }
 }
 pub(crate) struct OwnedUmem {
+    // Held for drop
+    #[allow(dead_code)]
     umem: Umem,
     buffer: Box<PacketBuffer>,
 }
 
 impl OwnedUmem {
     pub(crate) fn read<T: Copy>(&self, address: usize) -> T {
+        // Safety: Address is kernel managed, guaranteed in bounds and not used for writes.
         let ptr = unsafe { self.buffer.0.as_ptr().add(address) as *const T };
+        // Safety: Address is kernel managed, guaranteed not currently used for writes.
         unsafe { ptr.read() }
     }
     pub(crate) fn data(&self, address: u64, len: u32) -> &[u8] {
-        unsafe {
-            let ptr = self.buffer.0.as_ptr().add(address as usize);
-            core::slice::from_raw_parts(ptr, len as usize)
-        }
+        // Safety: Address is kernel managed, guaranteed in bounds and not used for writes.
+        let ptr = unsafe { self.buffer.0.as_ptr().add(address as usize) };
+        // Safety: Address is kernel managed, guaranteed not currently used for writes.
+        unsafe { core::slice::from_raw_parts(ptr, len as usize) }
     }
 
     pub(crate) unsafe fn write_at(&self, address: usize, bytes: &[u8]) {
+        // Safety: Address is from free list, guaranteed to be in bounds and available for writes.
         let ptr = unsafe { self.buffer.0.as_ptr().add(address) };
+        // Safety: Address is from free list, guaranteed to be in bounds and available for writes.
         unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len()) };
     }
 }
 
+// Safety: OwnedUmem owns the Umem and PacketBuffer, no other references
 unsafe impl Send for OwnedUmem {}
+// Safety: Frames are managed via free_list, write_at can never hit the same address at once.
 unsafe impl Sync for OwnedUmem {}
 
 pub struct AfXdpSocketLoader {
@@ -114,6 +124,7 @@ impl Loader for AfXdpSocketLoader {
         let fill_size = self.umem_config.fill_size;
         let buffer_size = self.umem_config.frame_size as usize * self.frame_count as usize;
         let buffer = Box::new(PacketBuffer::new(buffer_size)?);
+        // Safety: Properly page-aligned to 4096 bytes, buffer outlives umem in OwnedUmem
         let umem = unsafe { Umem::new(self.umem_config, buffer.as_slice())? };
 
         let mut info = IfInfo::invalid();
@@ -128,18 +139,18 @@ impl Loader for AfXdpSocketLoader {
         // Prefill the fill queue;
         {
             let mut wf = fill_queue.fill(fill_size);
-            let iter = (0..fill_size).map(|i| i as u64 * frame_size as u64);
+            let iter = (0..fill_size).map(|i| u64::from(i) * u64::from(frame_size));
             wf.insert(iter);
             wf.commit();
         }
         // Set remaining frames as free
         let free_list = Arc::new(ArrayQueue::new((self.frame_count) as usize));
         (fill_size..self.frame_count)
-            .map(|i| i as u64 * frame_size as u64)
+            .map(|i| u64::from(i) * u64::from(frame_size))
             .for_each(|addr| {
                 free_list
                     .push(addr)
-                    .expect("frames cannot exceed frame_count, must fit")
+                    .expect("frames cannot exceed frame_count, must fit");
             });
 
         let rx_tx = umem.rx_tx(&sock, &self.socket_config)?;
@@ -165,6 +176,10 @@ impl Loader for AfXdpSocketLoader {
 
 pub struct AfXdpSocket {
     pub(crate) channel: Option<(route::Sender, route::Receiver)>,
+    // Held for drop
+    #[allow(dead_code)]
     xsk_map: XskMap<MapData>,
+    // Held for drop
+    #[allow(dead_code)]
     umem: Arc<OwnedUmem>,
 }

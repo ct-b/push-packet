@@ -41,7 +41,8 @@ impl Receiver {
     pub fn recv(&mut self) -> Result<CopyEvent<'_>, Error> {
         let ptr = &raw mut self.ring_buf;
         loop {
-            // I don't think there is an alternative to this unsafe call
+            // Safety: The &mut self is held through the whole fn, this satisfies the borrow
+            // checker.
             if let Some(item) = unsafe { (*ptr).next() } {
                 return Ok(item.into());
             }

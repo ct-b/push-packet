@@ -119,5 +119,5 @@ pub fn try_route_packet(ctx: XdpContext) -> Result<u32, ()> {
     unsafe {
         core::ptr::write(metadata, route_args);
     };
-    Ok(XSK_MAP.redirect(0, 0).map_err(|_| ())?)
+    XSK_MAP.redirect(0, 0).map_err(|_| ())
 }

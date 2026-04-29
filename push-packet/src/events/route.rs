@@ -7,7 +7,7 @@ use push_packet_common::RouteArgs;
 use crate::{af_xdp::OwnedUmem, rules::RuleId};
 
 /// A packet event captured with [`crate::rules::Action::Route`]. This will take a frame in the
-/// AF_AXP socket until it is [dropped](`Drop`), so it should be consumed quickly. Calling
+/// `AF_AXP` socket until it is [dropped](`Drop`), so it should be consumed quickly. Calling
 /// [`RouteEvent::into_owned`] returns an [`OwnedRouteEvent`], releasing the frame at the cost of a
 /// copy.
 pub struct RouteEvent<'a> {
@@ -43,14 +43,15 @@ impl RouteEvent<'_> {
         self.umem.read(address)
     }
 
-    /// Converts to an [`OwnedRouteEvent`], releasing the underlying AF_XDP socket frame.
+    /// Converts to an [`OwnedRouteEvent`], releasing the underlying `AF_XDP` socket frame.
+    #[must_use]
     pub fn into_owned(self) -> OwnedRouteEvent {
         let route_args = self.route_args();
         let data = self.data().into();
-        OwnedRouteEvent { route_args, data }
+        OwnedRouteEvent { data, route_args }
     }
 }
-/// An owned version of [`RouteEvent`] that contains data copied from the AF_XDP socket frame.
+/// An owned version of [`RouteEvent`] that contains data copied from the `AF_XDP` socket frame.
 pub struct OwnedRouteEvent {
     data: Box<[u8]>,
     route_args: RouteArgs,

@@ -28,6 +28,7 @@ pub(crate) struct RelayLoader {
 }
 
 impl RelayLoader {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         copy_config: CopyConfig,
         route_config: RouteConfig,

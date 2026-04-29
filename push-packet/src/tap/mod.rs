@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use aya::{Ebpf, EbpfLoader, programs::XdpFlags};
 use push_packet_common::FrameKind;
-use xdpilone::{Socket, SocketConfig, Umem, UmemConfig};
+use xdpilone::{SocketConfig, UmemConfig};
 
 use crate::{
     channels::{self},
@@ -84,20 +84,20 @@ impl RouteConfig {
         self
     }
 
-    /// Overrides the default [`UmemConfig`] for the AF_XDP socket.
+    /// Overrides the default [`UmemConfig`] for the `AF_XDP` socket.
     #[must_use]
     pub fn umem_config(mut self, umem_config: UmemConfig) -> Self {
         self.umem_config = umem_config;
         self
     }
 
-    /// Overrides the default [`SocketConfig`] for the AF_XDP socket.
+    /// Overrides the default [`SocketConfig`] for the `AF_XDP` socket.
     #[must_use]
     pub fn socket_config(mut self, socket_config: SocketConfig) -> Self {
         self.socket_config = socket_config;
         self
     }
-    /// Sets the `frame_count` for the AF_XDP socket. Combined with the [`UmemConfig`] settings,
+    /// Sets the `frame_count` for the `AF_XDP` socket. Combined with the [`UmemConfig`] settings,
     /// this will determine the total size of the Umem region.
     #[must_use]
     pub fn frame_count(mut self, frame_count: u32) -> Self {
@@ -105,12 +105,12 @@ impl RouteConfig {
         self
     }
 
-    /// Sets the `queue_id` for the AF_XDP socket.
+    /// Sets the `queue_id` for the `AF_XDP` socket.
     ///
     /// # Note
-    /// The queue_id is likely not going to contain all of the traffic you expect unless you
+    /// The `queue_id` is likely not going to contain all of the traffic you expect unless you
     /// specifially route traffic to that queue id, for example, using `ethtool`.
-    /// https://www.kernel.org/doc/html/latest/networking/af_xdp.html#faq
+    /// <https://www.kernel.org/doc/html/latest/networking/af_xdp.html#faq>
     #[must_use]
     pub fn queue_id(mut self, queue_id: u32) -> Self {
         self.queue_id = queue_id;
@@ -274,17 +274,17 @@ impl<E: Engine> Tap<E> {
     /// Returns a tuple of [`channels::route::Sender`] and [`channels::route::Receiver`].
     ///
     /// # Errors
-    /// Returns [`Error::MissingRouteChannel`] if AF_XDP socket was not configured.
+    /// Returns [`Error::MissingRouteChannel`] if `AF_XDP` socket was not configured.
     pub fn route_channel(
         &mut self,
     ) -> Result<(channels::route::Sender, channels::route::Receiver), Error> {
         self.relay
             .af_xdp_socket
             .as_mut()
-            .ok_or(Error::MissingRouteCchannel)?
+            .ok_or(Error::MissingRouteChannel)?
             .channel
             .take()
-            .ok_or(Error::MissingRouteCchannel)
+            .ok_or(Error::MissingRouteChannel)
     }
 
     /// Returns a [`channels::copy::Receiver`] for receiving data.

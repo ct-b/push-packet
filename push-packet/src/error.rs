@@ -5,6 +5,7 @@ use aya::{EbpfError, programs::ProgramError};
 
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("invalid address")]
     InvalidAddress(#[from] std::net::AddrParseError),
@@ -31,26 +32,24 @@ pub enum Error {
     #[error("invalid frame kind: {0}")]
     InvalidFrameKind(u32),
     #[error("no AF_XDP socket has been allocated")]
-    MissingRouteCchannel,
+    MissingRouteChannel,
     #[error("no ringbuf has been allocated")]
     MissingRingBuf,
     #[error("the eBPF program has not been started")]
     ProgramNotRunning,
     #[error("the RingBufItem is not ready")]
     NoRingBufItem,
+    #[error("the call would block")]
+    WouldBlock,
     #[error("the channel has disconnected")]
     ChannelDisconnected,
     #[error("invalid sizing: {0}")]
     InvalidSize(&'static str),
     #[error("null pointer. This shouldn't happen.")]
     NullPointer,
-    #[error(
-        "to dynamically add Copy rules, use a Copy rule before Tap::start() or use TapConfig::with_copy"
-    )]
+    #[error("start with CopyConfig::force_enabled() or a copy rule before build() to use copy")]
     CopyNotEnabled,
-    #[error(
-        "to dynamically add Route rules, use a Route rule before Tap::start() or use TapConfig::with_copy"
-    )]
+    #[error("start with RouteConfig::force_enabled() or a route rule before build() to use route")]
     RouteNotEnabled,
     #[error("Xdpilone error: {0}")]
     XdpiloneError(i32),

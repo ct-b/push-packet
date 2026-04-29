@@ -1,4 +1,5 @@
 # push-packet
+[![ci](https://github.com/ct-b/push-packet/actions/workflows/ci.yml/badge.svg)](https://github.com/ct-b/push-packet/actions/workflows/ci.yml)
 
 push-packet is a packet-inspecting and routing library for Linux, built on [eBPF] with [aya]. It provides a simple rules-based interface for dropping packets, copying entire or partial packets, and routing packets to userspace via [AF_XDP].
 

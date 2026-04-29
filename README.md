@@ -1,36 +1,66 @@
 # push-packet
 
-## Prerequisites
+push-packet is a packet-inspecting and routing library for Linux, built on [eBPF] with [aya]. It provides a simple rules-based interface for dropping packets, copying entire or partial packets, and routing packets to userspace via [AF_XDP].
 
-1. stable rust toolchains: `rustup toolchain install stable`
-1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
-1. (if cross-compiling) rustup target: `rustup target add ${ARCH}-unknown-linux-musl`
-1. (if cross-compiling) LLVM: (e.g.) `brew install llvm` (on macOS)
-1. (if cross-compiling) C toolchain: (e.g.) [`brew install filosottile/musl-cross/musl-cross`](https://github.com/FiloSottile/homebrew-musl-cross) (on macOS)
-1. bpf-linker: `cargo install bpf-linker` (`--no-default-features` on macOS)
+## Features
+- Attach an XDP program to any Linux network interface.
+- Match packets based on source/destination CIDR, port range, and protocol.
+- Drop, copy (whole or partial), or redirect packets to userspace via [AF_XDP].
+- Add and remove rules dynamically while the program is attached.
+- Swappable trait-based matching Engine for different performance targets.
 
-## Build & Run
+## Example
 
-Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
+Copy all packets on an interface to userspace.
 
-```shell
-cargo run --release
+```rust
+use push_packet::{Tap, rules::{Rule, Action}};
+
+fn main() -> Result<(), push_packet::Error> {
+    let mut tap = Tap::builder("wlp3s0")?
+        .rule(
+            Rule::builder()
+                .source_cidr("0.0.0.0/0")
+                .action(Action::Copy { take: None }),
+        )?
+        .build()?;
+
+    let mut rx = tap.copy_receiver()?;
+    while let Ok(event) = rx.recv() {
+        println!("Received packet of length {}", event.packet_len());
+    }
+    Ok(())
+}
 ```
 
-Cargo build scripts are used to automatically build the eBPF correctly and include it in the
-program.
+## Overview
+push-packet utilizes eBPF XDP programs to drop, copy, and route packets. XDP runs before the packet enters the kernel network stack, enabling low-latency processing.
 
-## Cross-compiling on macOS
+#### Copy
+Packets are copied to userspace using a [BPF ring buffer]. Compared to a [perf event buffer], this preserves packet ordering at the cost of potential atomic contention under high load. Support for the [perf event buffer] may be added in the future.
 
-Cross compilation should work on both Intel and Apple Silicon Macs.
+#### Route
+Packets are routed to userspace using an [AF_XDP] socket. This allows for zero-copy routing on compatible network devices.
+
+The [AF_XDP] implementation currently consists of one [UMEM] region with one socket, and addresses exchanged via a queue. In the future, other configurations may be supported, such as:
+- Multiple sockets (1 per queue_id) with a shared [UMEM].
+- Multiple independent socket/[UMEM] setups, one per queue_id.
+
+## Building
+
+Prerequisites:
+
+- stable Rust toolchain
+- nightly Rust toolchain with `rust-src` (used to compile the eBPF programs)
+- `bpf-linker`: `cargo install bpf-linker`
 
 ```shell
-CC=${ARCH}-linux-musl-gcc cargo build --package push-packet --release \
-  --target=${ARCH}-unknown-linux-musl \
-  --config=target.${ARCH}-unknown-linux-musl.linker=\"${ARCH}-linux-musl-gcc\"
+cargo build --release
 ```
-The cross-compiled program `target/${ARCH}-unknown-linux-musl/release/push-packet` can be
-copied to a Linux server or VM and run there.
+
+The build script compiles the eBPF crate and embeds the result automatically.
+
+Runtime requirements: Linux 5.8+ (for the BPF ring buffer), `CAP_NET_ADMIN` + `CAP_BPF`. Anything using the library (integration tests, examples, your own programs) must run as root. The repo configures Cargo's runner to prepend `sudo -E` automatically; see `.cargo/config.toml`.
 
 ## License
 
@@ -42,7 +72,7 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
 be dual licensed as above, without any additional terms or conditions.
 
-### eBPF
+#### eBPF
 
 All eBPF code is distributed under either the terms of the
 [GNU General Public License, Version 2] or the [MIT license], at your
@@ -55,3 +85,9 @@ dual licensed as above, without any additional terms or conditions.
 [Apache license]: LICENSE-APACHE
 [MIT license]: LICENSE-MIT
 [GNU General Public License, Version 2]: LICENSE-GPL2
+[aya]: https://aya-rs.dev
+[eBPF]: https://ebpf.io/
+[AF_XDP]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html
+[BPF ring buffer]: https://www.kernel.org/doc/html/latest/bpf/ringbuf.html
+[perf event buffer]: https://www.kernel.org/doc/html/latest/bpf/map_perf_event_array.html
+[UMEM]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html#umem

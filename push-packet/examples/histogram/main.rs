@@ -99,6 +99,7 @@ pub struct LastPacket {
     proto: Proto,
     size: usize,
     source_addr: IpAddr,
+    #[allow(dead_code)]
     dest_addr: IpAddr,
     arrived_at: Instant,
 }
@@ -261,19 +262,19 @@ fn render(frame: &mut Frame, state: &State, window: usize, title_label: &str) {
         .values()
         .map(|pi| pi.sizes.iter().map(|sz| sz.1).sum::<usize>())
         .collect::<Vec<_>>();
-    let max_window_sum = window_sums.iter().map(|&s| s).max().unwrap_or(1);
+    let max_window_sum = window_sums.iter().copied().max().unwrap_or(1);
 
     let formatted = state
         .packet_info
-        .iter()
-        .map(|(_source_addr, packet_info)| {
+        .values()
+        .map(|packet_info| {
             let ports = match (packet_info.last.source_port, packet_info.last.dest_port) {
                 (Some(s), Some(d)) => format!("{:>5}:{:<5}", s, d),
                 _ => " ".repeat(11),
             };
             [
                 format!("{}", packet_info.display_addr),
-                format!("{}", format_bytes(packet_info.total_bytes),),
+                format_bytes(packet_info.total_bytes).to_string(),
                 format!("{} p", packet_info.total_packets),
                 format!(
                     "[{:<4} {} {:>width$} B]",
@@ -294,11 +295,7 @@ fn render(frame: &mut Frame, state: &State, window: usize, title_label: &str) {
         widths[3] = widths[3].max(cells[3].len());
     });
 
-    for ((i, cells), packet_info) in formatted
-        .iter()
-        .enumerate()
-        .zip(state.packet_info.values().into_iter())
-    {
+    for ((i, cells), packet_info) in formatted.iter().enumerate().zip(state.packet_info.values()) {
         const HEIGHT: usize = 1;
         let width = (window_sums[i] as f64 / max_window_sum as f64 * main.width as f64) as u16;
 

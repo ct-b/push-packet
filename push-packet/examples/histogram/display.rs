@@ -35,7 +35,7 @@ pub fn format_cells(data: &[String], maxes: &[usize], gap: usize, width: usize) 
     let div = rem / (terms.len() - 1).max(1);
     let mut output = String::new();
     terms.iter().enumerate().for_each(|(i, term)| {
-        output.push_str(&term);
+        output.push_str(term);
         if i < terms.len() {
             output.push_str(&" ".repeat(div));
         }

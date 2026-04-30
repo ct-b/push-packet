@@ -55,7 +55,8 @@ fn parse_data(data: &[u8]) -> &[u8] {
 }
 
 impl CopyEvent<'_> {
-    /// If set, returns the number of bytes copied.
+    /// If set, returns the number of bytes copied. This may be lower than the originally specified
+    /// value, if the packet is less than the original take.
     #[must_use]
     pub fn take(&self) -> Option<u32> {
         parse_take(&self.0)
@@ -119,7 +120,8 @@ impl AsRef<[u8]> for OwnedCopyEvent {
 }
 
 impl OwnedCopyEvent {
-    /// If set, returns the number of bytes copied.
+    /// If set, returns the number of bytes copied. This may be lower than the originally specified
+    /// value, if the packet is less than the original take.
     #[must_use]
     pub fn take(&self) -> Option<u32> {
         self.take

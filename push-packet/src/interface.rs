@@ -71,6 +71,13 @@ impl Interface {
     }
 }
 
+impl TryFrom<&String> for Interface {
+    type Error = Error;
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        Interface::from_name(value)
+    }
+}
+
 impl TryFrom<&str> for Interface {
     type Error = Error;
     fn try_from(value: &str) -> Result<Self, Self::Error> {

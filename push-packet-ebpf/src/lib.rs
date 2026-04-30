@@ -50,13 +50,14 @@ macro_rules! reserve_and_copy {
     ($bucket_size:literal, $copy_args:ident, $packet_len:ident, $ctx:ident) => {{
         let mut res = PP_RING_BUF.reserve_bytes($bucket_size, 0).ok_or(())?;
         let args = res.as_mut_ptr() as *mut CopyArgs;
-        unsafe { *args = $copy_args };
         const MAX_PAYLOAD: usize = $bucket_size - ARGS_LEN;
         let len = if $packet_len > MAX_PAYLOAD {
             MAX_PAYLOAD
         } else {
             $packet_len
         };
+        unsafe { *args = $copy_args };
+        unsafe { (*args).take = (*args).take.min(len as u32) };
         if len == 0 {
             res.discard(0);
             return Ok(xdp_action::XDP_PASS);

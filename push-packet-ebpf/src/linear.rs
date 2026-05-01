@@ -5,9 +5,8 @@ use core::mem;
 
 use aya_ebpf::{
     bindings::xdp_action::{self, XDP_PASS},
-    btf_maps::Array,
-    macros::{btf_map, map, xdp},
-    maps::ProgramArray,
+    macros::{map, xdp},
+    maps::{Array, ProgramArray},
     programs::XdpContext,
 };
 use network_types::{
@@ -27,17 +26,17 @@ use push_packet_ebpf::{
 #[map]
 static PROGRAM_ARRAY: ProgramArray = ProgramArray::with_max_entries(2, 0);
 
-#[btf_map]
-static LINEAR_MAP_V4: Array<Ipv4Rule, CAPACITY> = Array::new();
+#[map]
+static LINEAR_MAP_V4: Array<Ipv4Rule> = Array::with_max_entries(CAPACITY as u32, 0);
 
-#[btf_map]
-static LINEAR_MAP_V6: Array<Ipv6Rule, CAPACITY> = Array::new();
+#[map]
+static LINEAR_MAP_V6: Array<Ipv6Rule> = Array::with_max_entries(CAPACITY as u32, 0);
 
-#[btf_map]
-static FRAME_KIND_MAP: Array<FrameKind, 1> = Array::new();
+#[map]
+static FRAME_KIND_MAP: Array<FrameKind> = Array::with_max_entries(1, 0);
 
-#[btf_map]
-static LINEAR_RULE_COUNT: Array<u32, 2> = Array::new();
+#[map]
+static LINEAR_RULE_COUNT: Array<u32> = Array::with_max_entries(2, 0);
 
 #[xdp]
 pub fn copy_packet(ctx: XdpContext) -> u32 {
@@ -101,6 +100,8 @@ fn v6_cidr_match(address: [u8; 16], rule_address: [u8; 16], prefix_len: u8) -> b
 }
 
 #[inline(always)]
+#[allow(unreachable_code)]
+// Allow due to aya version, remove later
 fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -> Result<u32, ()> {
     let hdr: *const Ipv4Hdr = boundaries.ptr_at(offset)?;
     let hdr = unsafe { &*hdr };
@@ -213,6 +214,8 @@ fn parse_ipv6_proto(
 }
 
 #[inline(always)]
+// Allow due to aya version, remove later
+#[allow(unreachable_code)]
 fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -> Result<u32, ()> {
     let hdr: *const Ipv6Hdr = boundaries.ptr_at(offset)?;
     let hdr = unsafe { &*hdr };

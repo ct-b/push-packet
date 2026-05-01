@@ -10,7 +10,7 @@ pub use action::Action;
 use ipnet::IpNet;
 use net::IntoIpNet;
 use port::IntoPortRange;
-use push_packet_common::Protocol;
+pub use push_packet_common::Protocol;
 
 use crate::error::Error;
 

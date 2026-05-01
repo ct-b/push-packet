@@ -1,5 +1,5 @@
 //! Module containing the implmentation for a copy [`Receiver`].
-use std::os::fd::AsFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 
 use aya::maps::{MapData, RingBuf};
 use nix::poll::PollFlags;
@@ -46,7 +46,9 @@ impl Receiver {
             if let Some(item) = unsafe { (*ptr).next() } {
                 return Ok(item.into());
             }
-            crate::channels::poll::poll_fd(self.ring_buf.as_fd(), PollFlags::POLLIN)?;
+            // Safety: This version of aya doesn't expose as_fd(), wait for release.
+            let borrowed_fd = unsafe { BorrowedFd::borrow_raw(self.ring_buf.as_raw_fd()) };
+            crate::channels::poll::poll_fd(borrowed_fd, PollFlags::POLLIN)?;
         }
     }
 }

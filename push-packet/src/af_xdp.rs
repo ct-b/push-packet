@@ -115,7 +115,7 @@ impl Loader for AfXdpSocketLoader {
 
     fn configure(&self, ebpf_loader: &mut aya::EbpfLoader) -> Result<(), Error> {
         // Set to queue_id + 1 to allow a 1-1 NIC queue_id -> map index relationship
-        ebpf_loader.map_max_entries(XSK_MAP_NAME, self.queue_id + 1);
+        ebpf_loader.set_max_entries(XSK_MAP_NAME, self.queue_id + 1);
         Ok(())
     }
     fn load(self, ebpf: &mut aya::Ebpf) -> Result<Self::Component, crate::Error> {

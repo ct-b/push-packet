@@ -7,7 +7,6 @@ edition.workspace = true
 push-packet-common = { path = "../push-packet-common", features=["linear"] }
 
 aya-ebpf = { workspace = true }
-aya-log-ebpf = { workspace = true }
 network-types = "0.1.0"
 
 [build-dependencies]

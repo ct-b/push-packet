@@ -17,6 +17,9 @@ pub enum Action {
 }
 
 impl Action {
+    /// Convenience constant to copy the entire packet
+    pub const COPY_ALL: Action = Action::Copy { take: None };
+
     pub(crate) fn into_common_action(self) -> (push_packet_common::Action, Option<u32>) {
         match self {
             Self::Pass => (push_packet_common::Action::Pass, None),

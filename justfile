@@ -21,5 +21,15 @@ fix:
 lint-ebpf:
     cd push-packet-ebpf && cargo +nightly clippy --target bpfel-unknown-none -Z build-std=core -- -D warnings
 
+# Build all ebpf bin targets and copy them into push-packet/ebpf-bin/
+build-ebpf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo +nightly build -p push-packet-ebpf --release -Z build-std=core --target bpfel-unknown-none
+    target_dir="${CARGO_TARGET_DIR:-target}"
+    find "$target_dir/bpfel-unknown-none/release" -maxdepth 1 -type f \
+        ! -name '*.d' ! -name '*.rlib' ! -name '.*' \
+        -exec cp -v {} push-packet/ebpf-bin/ \;
+
 # Full check including the ebpf crate
 check-all: check lint-ebpf

@@ -27,6 +27,43 @@
 //! # Ok(())
 //! # }
 //! ```
+//! # Example: Tap into an interface, add and remove rules dynamically.
+//! ```no_run
+//! # use push_packet::{Tap, rules::{Rule, Action, Protocol}, CopyConfig};
+//! # fn main() -> Result<(), push_packet::Error> {
+//! let mut tap = Tap::builder("wlp3s0")?
+//!     // Set force_enabled on the copy config so we can use copy rules later.
+//!     .copy_config(CopyConfig::default().force_enabled())
+//!     .build()?;
+//!
+//! // call add_rule to get a RuleId
+//! let drop_rule_id = tap.add_rule(
+//!     Rule::protocol(Protocol::Tcp)
+//!         .source_cidr("127.0.0.1")
+//!         .source_port(3000..4000)
+//!         .action(Action::Drop),
+//! )?;
+//!
+//! // [traffic dropped]
+//!
+//! // Remove a rule with RuleId
+//! tap.remove_rule(drop_rule_id)?;
+//!
+//! // Read some traffic instead
+//! tap.add_rule(
+//!     Rule::source_cidr("127.0.0.1")
+//!         .source_port(3001)
+//!         .action(Action::COPY_ALL),
+//! )?;
+//!
+//! let mut rx = tap.copy_receiver()?;
+//! while let Ok(event) = rx.recv() {
+//!     println!("Received packet of length {}", event.packet_len());
+//! }
+//!
+//! # Ok(())
+//! # }
+//! ```
 
 mod af_xdp;
 mod array_ext;
@@ -46,4 +83,5 @@ pub mod rules;
 pub use error::Error;
 pub use interface::Interface;
 pub use loader::Loader;
+pub use push_packet_common::FrameKind;
 pub use tap::{CopyConfig, RouteConfig, Tap, TapBuilder};

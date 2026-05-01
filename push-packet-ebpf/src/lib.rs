@@ -10,7 +10,7 @@ use core::ops::Neg;
 use args_ext::CopyArgsExt;
 use aya_ebpf::{
     bindings::xdp_action,
-    helpers::generated::{bpf_xdp_adjust_meta, bpf_xdp_load_bytes},
+    helpers::{bpf_xdp_adjust_meta, bpf_xdp_load_bytes},
     macros::map,
     maps::{PerCpuArray, RingBuf, XskMap},
     programs::XdpContext,
@@ -48,8 +48,9 @@ fn power_of_2_bucket(n: usize) -> usize {
 
 macro_rules! reserve_and_copy {
     ($bucket_size:literal, $copy_args:ident, $packet_len:ident, $ctx:ident) => {{
-        let mut res = PP_RING_BUF.reserve_bytes($bucket_size, 0).ok_or(())?;
-        let args = res.as_mut_ptr() as *mut CopyArgs;
+        let mut res = PP_RING_BUF.reserve::<[u8; $bucket_size]>(0).ok_or(())?;
+        let buf = res.as_mut_ptr() as *mut u8;
+        let args = buf as *mut CopyArgs;
         const MAX_PAYLOAD: usize = $bucket_size - ARGS_LEN;
         let len = if $packet_len > MAX_PAYLOAD {
             MAX_PAYLOAD
@@ -66,7 +67,7 @@ macro_rules! reserve_and_copy {
             bpf_xdp_load_bytes(
                 $ctx.ctx as *mut _,
                 0,
-                res.as_mut_ptr().add(ARGS_LEN) as *mut _,
+                buf.add(ARGS_LEN) as *mut _,
                 len as u32,
             )
         };

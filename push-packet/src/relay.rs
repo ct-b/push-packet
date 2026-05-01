@@ -79,12 +79,12 @@ impl Loader for RelayLoader {
 
     fn configure(&self, ebpf_loader: &mut EbpfLoader) -> Result<(), Error> {
         if let Some(size) = self.ring_buf_size {
-            ebpf_loader.map_max_entries(RING_BUF_NAME, size);
+            ebpf_loader.set_max_entries(RING_BUF_NAME, size);
         }
         if let Some(af_xdp_loader) = &self.af_xdp_loader {
             af_xdp_loader.configure(ebpf_loader)?;
         }
-        ebpf_loader.map_max_entries(PROGRAM_ARRAY_NAME, 2);
+        ebpf_loader.set_max_entries(PROGRAM_ARRAY_NAME, 2);
         Ok(())
     }
 

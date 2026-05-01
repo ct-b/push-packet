@@ -27,8 +27,31 @@ jobs:
         run: cargo +nightly fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --exclude push-packet-ebpf --all-targets --all-features -- -D warnings
+      - name: test
+        run: cargo test --workspace --exclude push-packet-ebpf --all-features
       - name: doc
         run: cargo doc --workspace --exclude push-packet-ebpf --all-features --no-deps
       - name: clippy-ebpf
         working-directory: push-packet-ebpf
         run: cargo +nightly clippy --target bpfel-unknown-none -Z build-std=core -- -D warnings
+      - name: build-ebpf
+        working-directory: push-packet-ebpf
+        run: cargo +nightly build --release -Z build-std=core --target bpfel-unknown-none
+      - name: verify-ebpf-blobs
+        run: |
+          set -e
+          stale=0
+          for blob in push-packet/ebpf-bin/*; do
+            name=$(basename "$blob")
+            built="target/bpfel-unknown-none/release/$name"
+            if [ ! -f "$built" ]; then
+              echo "::error::push-packet/ebpf-bin/$name has no matching [[bin]] in push-packet-ebpf"
+              stale=1
+              continue
+            fi
+            if ! cmp -s "$blob" "$built"; then
+              echo "::error::push-packet/ebpf-bin/$name is stale (rebuild and commit: just build-ebpf)"
+              stale=1
+            fi
+          done
+          exit $stale

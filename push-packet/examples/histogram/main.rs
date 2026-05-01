@@ -189,7 +189,7 @@ fn main() -> color_eyre::Result<()> {
 
     let iface = interface.clone();
     // Start the tap on another thread.
-    let _handle = std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         // We need to set force_enabled=true on the copy config if we don't start it with rules.
         // This allows us to determine the header size based on the FrameKind for the take, which
         // allows us to copy only data we are interested in, regardless of whether the interface
@@ -219,6 +219,9 @@ fn main() -> color_eyre::Result<()> {
     });
 
     loop {
+        if handle.is_finished() {
+            break;
+        }
         for _ in 0..FRAME_PACKET_LIMIT {
             let Ok(message) = rx.try_recv() else {
                 break;
@@ -269,6 +272,7 @@ fn main() -> color_eyre::Result<()> {
     }
 
     ratatui::restore();
+    handle.join().unwrap()?;
     Ok(())
 }
 

@@ -6,11 +6,11 @@ push-packet is a packet-inspecting and routing library for Linux, built on [eBPF
 ## Features
 - Attach an XDP program to any Linux network interface.
 - Match packets based on source/destination CIDR, port range, and protocol.
-- Drop, copy (whole or partial), or redirect packets to userspace via [AF_XDP].
+- Drop, copy (whole or partial), or redirect packets to userspace via AF_XDP.
 - Add and remove rules dynamically while the program is attached.
 - Swappable trait-based matching Engine for different performance targets.
 
-## Example
+## Examples
 
 Copy all packets on an interface to userspace.
 
@@ -34,18 +34,71 @@ fn main() -> Result<(), push_packet::Error> {
 }
 ```
 
+Add and remove rules at runtime.
+```rust
+use push_packet::{Tap, rules::{Rule, Action, Protocol}, CopyConfig};
+
+fn main() -> Result<(), push_packet::Error> {
+    let mut tap = Tap::builder("wlp3s0")?
+        // Set force_enabled on the copy config so we can use copy rules later.
+        .copy_config(CopyConfig::default().force_enabled())
+        .build()?;
+
+    // call add_rule to get a RuleId
+    let drop_rule_id = tap.add_rule(
+        Rule::protocol(Protocol::Tcp)
+            .source_cidr("127.0.0.1")
+            .source_port(3000..4000)
+            .action(Action::Drop),
+    )?;
+
+    // [traffic dropped]
+
+    // Remove a rule with RuleId
+    tap.remove_rule(drop_rule_id)?;
+
+    // Read some traffic instead
+    tap.add_rule(
+        Rule::source_cidr("127.0.0.1")
+            .source_port(3001)
+            .action(Action::COPY_ALL),
+    )?;
+
+    let mut rx = tap.copy_receiver()?;
+    while let Ok(event) = rx.recv() {
+        println!("Received packet of length {}", event.packet_len());
+    }
+
+    Ok(())
+}
+```
+
+*The [histogram](push-packet/examples/histogram) example program captures all traffic and displays a histogram showing distribution of traffic over a given time window.*
+![histogram demo](assets/histogram.gif)
+
 ## Overview
-push-packet utilizes eBPF XDP programs to drop, copy, and route packets. XDP runs before the packet enters the kernel network stack, enabling low-latency processing.
+push-packet utilizes eBPF XDP programs to drop, copy, and route packets. XDP runs before the packet enters the kernel network stack, enabling low-latency processing. As such this currently only supports monitoring and affecting ingress, though [TC] programs may be included in the future for egress control.
+
+#### Engine
+Push-packet is oriented around an [Engine] trait, which specifies the accompanying BPF files that apply the matching rules. Currently there is only one implementation, the [LinearEngine], which scans rules linearly. This is abstracted so other strategies such as tries and bit vectors can be used in the future, and so users can utilize their own Engine and BPF code to suit their individual needs.
 
 #### Copy
-Packets are copied to userspace using a [BPF ring buffer]. Compared to a [perf event buffer], this preserves packet ordering at the cost of potential atomic contention under high load. Support for the [perf event buffer] may be added in the future.
+Packets are copied to userspace using a [BPF ring buffer]. Compared to a [perf event buffer], this preserves packet ordering at the cost of potential atomic contention under high load. Support for the perf event buffer may be added in the future.
 
 #### Route
-Packets are routed to userspace using an [AF_XDP] socket. This allows for zero-copy routing on compatible network devices.
+Packets are routed to userspace using an AF_XDP socket. This allows for zero-copy routing on compatible network devices.
 
-The [AF_XDP] implementation currently consists of one [UMEM] region with one socket, and addresses exchanged via a queue. In the future, other configurations may be supported, such as:
-- Multiple sockets (1 per queue_id) with a shared [UMEM].
-- Multiple independent socket/[UMEM] setups, one per queue_id.
+The AF_XDP implementation currently consists of one [UMEM] region with one socket, and addresses exchanged via a queue. In the future, other configurations may be supported, such as:
+- Multiple sockets (1 per queue_id) with a shared UMEM.
+- Multiple independent socket/UMEM setups, one per queue_id.
+
+## Motivation
+
+While learning about kernel-bypass methods for low-latency work, I came across a blog post that mentioned eBPF as a potential *reasonably* low-latency method to bypass most of the networking stack. Traditionally, the options are to use a specialized NIC, or have [DPDK] capture all traffic from the card. That led me to aya, and the original plan was to make a simple AF_XDP-based networking stack bypass that interfaces to [smoltcp], allowing users to bypass only the address ranges they care about.
+
+After getting acquainted with aya, I realized it wouldn't take considerably more effort to offer a copy path as well. Coupled with a simple rules-based system for copying and routing traffic, I felt like repositioning this as a flexible, easy-to-use library for people to build simple traffic analysis tools with.
+
+I still plan to support a smoltcp integration, and other controls for the AF_XDP socket configuration (busy-poll, etc.), but my goals have changed to providing an ergonomic, general-purpose packet-inspection and routing system for modern Linux.
 
 ## Building
 
@@ -76,7 +129,7 @@ be dual licensed as above, without any additional terms or conditions.
 #### eBPF
 
 All eBPF code is distributed under either the terms of the
-[GNU General Public License, Version 2] or the [MIT license], at your
+[GNU General Public License, Version 2] or the MIT license, at your
 option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
@@ -92,3 +145,8 @@ dual licensed as above, without any additional terms or conditions.
 [BPF ring buffer]: https://www.kernel.org/doc/html/latest/bpf/ringbuf.html
 [perf event buffer]: https://www.kernel.org/doc/html/latest/bpf/map_perf_event_array.html
 [UMEM]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html#umem
+[smoltcp]: https://github.com/smoltcp-rs/smoltcp
+[DPDK]: https://www.dpdk.org/
+[TC]: https://man7.org/linux/man-pages/man8/tc-bpf.8.html
+[Engine]: push-packet/src/engine/mod.rs
+[LinearEngine]: push-packet/src/engine/linear/mod.rs

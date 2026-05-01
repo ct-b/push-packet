@@ -30,7 +30,7 @@ pub fn fade(base_color: Color, last: Instant, window: usize) -> Color {
     };
     let t = (last.elapsed().as_secs_f32() / window as f32).clamp(0.0, 1.0);
     const BG: (f32, f32, f32) = (8.0, 8.0, 8.0);
-    let alpha = 0.9 - 0.7 * t;
+    let alpha = 0.9 - 0.8 * t;
     let blend = |fg: u8, bg: f32| (alpha * fg as f32 + (1.0 - alpha) * bg) as u8;
     Color::Rgb(blend(r, BG.0), blend(g, BG.1), blend(b, BG.2))
 }

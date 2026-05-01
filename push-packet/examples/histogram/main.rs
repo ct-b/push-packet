@@ -21,9 +21,9 @@ use push_packet_common::FrameKind;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::Line,
-    widgets::Block,
+    widgets::{Block, Borders, Clear, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::{
@@ -38,7 +38,7 @@ use crate::{
 pub struct Args {
     #[arg(short, long)]
     interface: String,
-    #[arg(short, long, default_value_t = 20)]
+    #[arg(short, long, default_value_t = 10)]
     window: usize,
     #[arg(short, long)]
     nickname: Option<String>,
@@ -51,7 +51,13 @@ pub struct State {
     parse_failures: usize,
     max_ip_bytes: usize,
     mask_seed: Option<u64>,
+    scroll: usize,
+    show_stale: bool,
+    show_log: bool,
+    log: VecDeque<(Instant, String)>,
 }
+
+const LOG_CAPACITY: usize = 200;
 
 impl State {
     fn new(mask: bool) -> Self {
@@ -66,6 +72,10 @@ impl State {
             parse_failures: 0,
             max_ip_bytes: 0,
             mask_seed,
+            scroll: 0,
+            show_stale: true,
+            show_log: false,
+            log: VecDeque::new(),
         }
     }
 }
@@ -160,7 +170,7 @@ const FRAME_PACKET_LIMIT: usize = 1000;
 
 enum Message {
     Packet(LastPacket),
-    ParseFailed,
+    ParseFailed(String),
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -201,8 +211,8 @@ fn main() -> color_eyre::Result<()> {
 
         while let Ok(packet) = copy_rx.recv() {
             match parse_packet(packet, is_ip_frame) {
-                None => tx.send(Message::ParseFailed).unwrap(),
-                Some(packet) => tx.send(Message::Packet(packet)).unwrap(),
+                Err(msg) => tx.send(Message::ParseFailed(msg)).unwrap(),
+                Ok(packet) => tx.send(Message::Packet(packet)).unwrap(),
             }
         }
         Ok::<(), push_packet::Error>(())
@@ -215,7 +225,13 @@ fn main() -> color_eyre::Result<()> {
             };
 
             match message {
-                Message::ParseFailed => state.parse_failures += 1,
+                Message::ParseFailed(msg) => {
+                    state.parse_failures += 1;
+                    if state.log.len() == LOG_CAPACITY {
+                        state.log.pop_front();
+                    }
+                    state.log.push_back((Instant::now(), msg));
+                }
                 Message::Packet(packet) => {
                     let mask_seed = state.mask_seed;
                     let entry = state
@@ -228,10 +244,19 @@ fn main() -> color_eyre::Result<()> {
             }
         }
 
-        match poll_input()? {
-            Some(Command::Quit) => break,
-            Some(Command::Reset) => state.packet_info.clear(),
-            _ => {}
+        let mut quit = false;
+        for cmd in poll_input()? {
+            match cmd {
+                Command::Quit => quit = true,
+                Command::Reset => state.packet_info.clear(),
+                Command::ScrollUp => state.scroll = state.scroll.saturating_sub(1),
+                Command::ScrollDown => state.scroll = state.scroll.saturating_add(1),
+                Command::ToggleStale => state.show_stale = !state.show_stale,
+                Command::ToggleLog => state.show_log = !state.show_log,
+            }
+        }
+        if quit {
+            break;
         }
         state.packet_info.values_mut().for_each(|pi| {
             pi.sizes.retain(|sz| {
@@ -240,26 +265,42 @@ fn main() -> color_eyre::Result<()> {
             });
         });
 
-        terminal.draw(|frame| render(frame, &state, window, &title_label))?;
+        terminal.draw(|frame| render(frame, &mut state, window, &title_label))?;
     }
 
     ratatui::restore();
     Ok(())
 }
 
-fn render(frame: &mut Frame, state: &State, window: usize, title_label: &str) {
-    let [title, main, legend] = Layout::vertical([
+fn render(frame: &mut Frame, state: &mut State, window: usize, title_label: &str) {
+    let [title, _gap1, main, _gap2, legend] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Fill(100),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .areas(frame.area());
     frame.render_widget(format!("push-packet | histogram | {}", title_label), title);
-    let _ = legend;
+    let stale_label = if state.show_stale { "hide" } else { "show" };
+    frame.render_widget(
+        Line::from(format!(
+            "r: reset  s: {stale_label} stale  l: log  q: quit"
+        ))
+        .style(Style::default().fg(Color::DarkGray)),
+        legend,
+    );
+    frame.render_widget(
+        Line::from(format!("parse failures: {}", state.parse_failures))
+            .style(Style::default().fg(Color::DarkGray))
+            .right_aligned(),
+        legend,
+    );
 
     let window_sums = state
         .packet_info
         .values()
+        .filter(|pi| !pi.sizes.is_empty())
         .map(|pi| pi.sizes.iter().map(|sz| sz.1).sum::<usize>())
         .collect::<Vec<_>>();
     let max_window_sum = window_sums.iter().copied().max().unwrap_or(1);
@@ -295,37 +336,142 @@ fn render(frame: &mut Frame, state: &State, window: usize, title_label: &str) {
         widths[3] = widths[3].max(cells[3].len());
     });
 
-    for ((i, cells), packet_info) in formatted.iter().enumerate().zip(state.packet_info.values()) {
-        const HEIGHT: usize = 1;
-        let width = (window_sums[i] as f64 / max_window_sum as f64 * main.width as f64) as u16;
+    let scrollbar_area = main;
+    let main = Rect {
+        width: main.width.saturating_sub(2),
+        ..main
+    };
 
-        let bg_color = fade(packet_info.base_color, packet_info.last.arrived_at, window);
-        let color = text_color(bg_color);
-        let bar_width = width.min(main.width);
-        let bar = Rect {
-            x: main.x,
-            y: main.y + (i * HEIGHT) as u16,
-            width: bar_width,
-            height: HEIGHT as u16,
-        };
-        frame.render_widget(Block::new().style(Style::default().bg(bg_color)), bar);
+    let view_height = main.height as usize;
+    let total = if state.show_stale {
+        state.packet_info.len()
+    } else {
+        window_sums.len()
+    };
+    state.scroll = state.scroll.min(total.saturating_sub(view_height));
+    let scroll = state.scroll;
+    let visible_y = |i: usize| -> Option<u16> {
+        let row = i.checked_sub(scroll)?;
+        (row < view_height).then_some(main.y + row as u16)
+    };
 
-        let output = format_cells(cells, &widths, 2, main.width as usize);
+    let mut i = 0;
+    for (cells, packet_info) in formatted.iter().zip(state.packet_info.values()) {
+        if packet_info.sizes.is_empty() {
+            continue;
+        }
+        if let Some(y) = visible_y(i) {
+            let width =
+                (window_sums[i] as f64 / max_window_sum as f64 * main.width as f64) as u16;
 
-        let full_rect = Rect {
-            x: main.x,
-            y: main.y + (i * HEIGHT) as u16,
-            width: main.width,
-            height: HEIGHT as u16,
-        };
-        let on_bar = Rect {
-            width: bar_width,
-            ..full_rect
+            let bg_color = fade(packet_info.base_color, packet_info.last.arrived_at, window);
+            let color = text_color(bg_color);
+            let bar_width = width.min(main.width);
+            let bar = Rect {
+                x: main.x,
+                y,
+                width: bar_width,
+                height: 1,
+            };
+            frame.render_widget(Block::new().style(Style::default().bg(bg_color)), bar);
+
+            let output = format_cells(cells, &widths, 2, main.width as usize);
+
+            let full_rect = Rect {
+                x: main.x,
+                y,
+                width: main.width,
+                height: 1,
+            };
+            let on_bar = Rect {
+                width: bar_width,
+                ..full_rect
+            };
+            frame.render_widget(
+                Line::from(output.clone()).style(Style::default().fg(packet_info.base_color)),
+                full_rect,
+            );
+            frame.render_widget(Line::from(output).style(Style::default().fg(color)), on_bar);
+        }
+        i += 1;
+    }
+
+    let inactive_style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::ITALIC);
+    for (cells, packet_info) in formatted.iter().zip(state.packet_info.values()) {
+        if !packet_info.sizes.is_empty() {
+            continue;
+        }
+        if !state.show_stale {
+            break;
+        }
+        if let Some(y) = visible_y(i) {
+            let output = format_cells(cells, &widths, 2, main.width as usize);
+            let full_rect = Rect {
+                x: main.x,
+                y,
+                width: main.width,
+                height: 1,
+            };
+            frame.render_widget(Line::from(output).style(inactive_style), full_rect);
+        }
+        i += 1;
+    }
+
+    if total > view_height {
+        let max_scroll = total - view_height;
+        let mut sb_state = ScrollbarState::new(max_scroll + 1)
+            .viewport_content_length(view_height)
+            .position(scroll);
+        let grey = Style::default().fg(Color::DarkGray);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(grey)
+                .track_style(grey)
+                .begin_style(grey)
+                .end_style(grey),
+            scrollbar_area,
+            &mut sb_state,
+        );
+    }
+
+    if state.show_log {
+        render_log(frame, scrollbar_area, &state.log);
+    }
+}
+
+fn render_log(frame: &mut Frame, area: Rect, log: &VecDeque<(Instant, String)>) {
+    let popup = Rect {
+        x: area.x + area.width / 10,
+        y: area.y + area.height / 10,
+        width: area.width.saturating_sub(area.width / 5).max(20),
+        height: area.height.saturating_sub(area.height / 5).max(5),
+    };
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" parse failures ({}) ", log.len()))
+        .style(Style::default().fg(Color::DarkGray).bg(Color::Black));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let lines: Vec<_> = log
+        .iter()
+        .rev()
+        .take(inner.height as usize)
+        .map(|(at, msg)| format!("{:>3}s ago  {msg}", at.elapsed().as_secs()))
+        .collect();
+    for (i, text) in lines.iter().enumerate() {
+        let row = Rect {
+            x: inner.x,
+            y: inner.y + i as u16,
+            width: inner.width,
+            height: 1,
         };
         frame.render_widget(
-            Line::from(output.clone()).style(Style::default().fg(packet_info.base_color)),
-            full_rect,
+            Line::from(text.as_str()).style(Style::default().fg(Color::Gray)),
+            row,
         );
-        frame.render_widget(Line::from(output).style(Style::default().fg(color)), on_bar);
     }
 }

@@ -19,14 +19,14 @@ pub fn ingest_packet(packet: LastPacket, entry: &mut PacketInfo) {
 }
 
 // Parse the packet
-pub fn parse_packet(packet: CopyEvent<'_>, is_ip_frame: bool) -> Option<LastPacket> {
+pub fn parse_packet(packet: CopyEvent<'_>, is_ip_frame: bool) -> Result<LastPacket, String> {
     let arrived_at = Instant::now();
     let bytes = packet.data();
     let len = packet.packet_len();
     let packet = if is_ip_frame {
-        LaxSlicedPacket::from_ip(bytes).unwrap()
+        LaxSlicedPacket::from_ip(bytes).map_err(|e| format!("ip slice ({len}B): {e}"))?
     } else {
-        LaxSlicedPacket::from_ethernet(bytes).unwrap()
+        LaxSlicedPacket::from_ethernet(bytes).map_err(|e| format!("eth slice ({len}B): {e}"))?
     };
     let (source_addr, dest_addr): (IpAddr, IpAddr) = match packet.net {
         Some(etherparse::LaxNetSlice::Ipv4(v4)) => (
@@ -37,7 +37,8 @@ pub fn parse_packet(packet: CopyEvent<'_>, is_ip_frame: bool) -> Option<LastPack
             v6.header().source_addr().into(),
             v6.header().destination_addr().into(),
         ),
-        _ => return None,
+        Some(etherparse::LaxNetSlice::Arp(_)) => return Err(format!("ARP packet ({len}B)")),
+        None => return Err(format!("no IP layer ({len}B)")),
     };
 
     let (proto, source_port, dest_port): (Proto, Option<u16>, Option<u16>) = match packet.transport
@@ -54,9 +55,9 @@ pub fn parse_packet(packet: CopyEvent<'_>, is_ip_frame: bool) -> Option<LastPack
         ),
         Some(etherparse::TransportSlice::Icmpv4(_)) => (Proto::Icmp, None, None),
         Some(etherparse::TransportSlice::Icmpv6(_)) => (Proto::Icmp, None, None),
-        _ => return None,
+        None => return Err(format!("no transport layer ({source_addr} -> {dest_addr})")),
     };
-    let last_packet = LastPacket {
+    Ok(LastPacket {
         source_port,
         dest_port,
         source_addr,
@@ -64,6 +65,5 @@ pub fn parse_packet(packet: CopyEvent<'_>, is_ip_frame: bool) -> Option<LastPack
         proto,
         size: len as usize,
         arrived_at,
-    };
-    Some(last_packet)
+    })
 }

@@ -284,10 +284,8 @@ fn render(frame: &mut Frame, state: &mut State, window: usize, title_label: &str
     frame.render_widget(format!("push-packet | histogram | {}", title_label), title);
     let stale_label = if state.show_stale { "hide" } else { "show" };
     frame.render_widget(
-        Line::from(format!(
-            "r: reset  s: {stale_label} stale  l: log  q: quit"
-        ))
-        .style(Style::default().fg(Color::DarkGray)),
+        Line::from(format!("r: reset  s: {stale_label} stale  l: log  q: quit"))
+            .style(Style::default().fg(Color::DarkGray)),
         legend,
     );
     frame.render_widget(
@@ -361,8 +359,7 @@ fn render(frame: &mut Frame, state: &mut State, window: usize, title_label: &str
             continue;
         }
         if let Some(y) = visible_y(i) {
-            let width =
-                (window_sums[i] as f64 / max_window_sum as f64 * main.width as f64) as u16;
+            let width = (window_sums[i] as f64 / max_window_sum as f64 * main.width as f64) as u16;
 
             let bg_color = fade(packet_info.base_color, packet_info.last.arrived_at, window);
             let color = text_color(bg_color);

@@ -1,10 +1,16 @@
 [package]
 name = "push-packet-ebpf"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
+description = "Internal eBPF programs for push-packet."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
-push-packet-common = { path = "../push-packet-common", features=["linear"] }
+push-packet-common = { workspace = true, features = ["linear"] }
 
 aya-ebpf = { workspace = true }
 network-types = "0.1.0"

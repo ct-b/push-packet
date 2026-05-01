@@ -11,8 +11,15 @@ default-members = ["push-packet", "push-packet-common"]
 license = "MIT OR Apache-2.0"
 edition = "2024"
 version= "0.1.0"
+repository = "https://github.com/ct-b/push-packet"
+homepage = "https://github.com/ct-b/push-packet"
+keywords = ["ebpf", "networking", "aya", "af-xdp", "xdp"]
+categories = ["network-programming", "os::linux-apis"]
 
 [workspace.dependencies]
+push-packet-common = { path = "push-packet-common", version = "0.1.0" }
+push-packet-ebpf = { path = "push-packet-ebpf", version = "0.1.0" }
+
 aya = { version="0.13.1", default-features = false }
 aya-build = { version="0.1.3", default-features = false }
 aya-ebpf = { version="0.1.1", default-features = false }

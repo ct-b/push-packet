@@ -3,6 +3,11 @@ name = "push-packet-common"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+description = "Internal shared types for push-packet."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 default = []

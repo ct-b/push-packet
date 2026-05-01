@@ -73,8 +73,8 @@ fn main() -> Result<(), push_packet::Error> {
 }
 ```
 
-*The [histogram](push-packet/examples/histogram) example program captures all traffic and displays a histogram showing distribution of traffic over a given time window.*
-![histogram demo](assets/histogram.gif)
+*The [histogram](https://github.com/ct-b/push-packet/tree/main/push-packet/examples/histogram) example program captures all traffic and displays a histogram showing distribution of traffic over a given time window.*
+![histogram demo](https://raw.githubusercontent.com/ct-b/push-packet/main/assets/histogram.gif)
 
 ## Overview
 push-packet utilizes eBPF XDP programs to drop, copy, and route packets. XDP runs before the packet enters the kernel network stack, enabling low-latency processing. As such this currently only supports monitoring and affecting ingress, though [TC] programs may be included in the future for egress control.
@@ -136,9 +136,9 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in this project by you, as defined in the GPL-2 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
-[Apache license]: LICENSE-APACHE
-[MIT license]: LICENSE-MIT
-[GNU General Public License, Version 2]: LICENSE-GPL2
+[Apache license]: https://github.com/ct-b/push-packet/blob/main/LICENSE-APACHE
+[MIT license]: https://github.com/ct-b/push-packet/blob/main/LICENSE-MIT
+[GNU General Public License, Version 2]: https://github.com/ct-b/push-packet/blob/main/LICENSE-GPL2
 [aya]: https://aya-rs.dev
 [eBPF]: https://ebpf.io/
 [AF_XDP]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html
@@ -148,5 +148,5 @@ dual licensed as above, without any additional terms or conditions.
 [smoltcp]: https://github.com/smoltcp-rs/smoltcp
 [DPDK]: https://www.dpdk.org/
 [TC]: https://man7.org/linux/man-pages/man8/tc-bpf.8.html
-[Engine]: push-packet/src/engine/mod.rs
-[LinearEngine]: push-packet/src/engine/linear/mod.rs
+[Engine]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/engine/mod.rs
+[LinearEngine]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/engine/linear/mod.rs

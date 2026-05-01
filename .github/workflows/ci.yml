@@ -9,20 +9,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
+  ci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-04-30
         with:
-          components: clippy
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
+          toolchain: nightly
           components: rustfmt, clippy, rust-src
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-04-30
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc  # v2.9.1
       - run: cargo install bpf-linker --locked
+      - name: build-ebpf
+        run: cargo +nightly build -p push-packet-ebpf --release -Z build-std=core --target bpfel-unknown-none
+      - name: copy-ebpf-blobs
+        run: |
+          target_dir="${CARGO_TARGET_DIR:-target}"
+          find "$target_dir/bpfel-unknown-none/release" -maxdepth 1 -type f \
+              ! -name '*.d' ! -name '*.rlib' ! -name '.*' \
+              -exec cp {} push-packet/ebpf-bin/ \;
       - name: fmt
         run: cargo +nightly fmt --all -- --check
       - name: clippy
@@ -34,24 +46,9 @@ jobs:
       - name: clippy-ebpf
         working-directory: push-packet-ebpf
         run: cargo +nightly clippy --target bpfel-unknown-none -Z build-std=core -- -D warnings
-      - name: build-ebpf
-        working-directory: push-packet-ebpf
-        run: cargo +nightly build --release -Z build-std=core --target bpfel-unknown-none
-      - name: verify-ebpf-blobs
-        run: |
-          set -e
-          stale=0
-          for blob in push-packet/ebpf-bin/*; do
-            name=$(basename "$blob")
-            built="target/bpfel-unknown-none/release/$name"
-            if [ ! -f "$built" ]; then
-              echo "::error::push-packet/ebpf-bin/$name has no matching [[bin]] in push-packet-ebpf"
-              stale=1
-              continue
-            fi
-            if ! cmp -s "$blob" "$built"; then
-              echo "::error::push-packet/ebpf-bin/$name is stale (rebuild and commit: just build-ebpf)"
-              stale=1
-            fi
-          done
-          exit $stale
+      - name: commit-ebpf-blobs
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403  # v5.2.0
+        with:
+          commit_message: "ci: rebuild eBPF blobs"
+          file_pattern: "push-packet/ebpf-bin/*"

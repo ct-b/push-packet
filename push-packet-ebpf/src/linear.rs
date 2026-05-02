@@ -115,11 +115,11 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         IpProto::Tcp | IpProto::Udp => {
             let ports: *const [u16; 2] = boundaries.ptr_at(transport_offset)?;
             (
-                u16::from_be(unsafe { (*ports)[0] }),
-                u16::from_be(unsafe { (*ports)[1] }),
+                Some(u16::from_be(unsafe { (*ports)[0] })),
+                Some(u16::from_be(unsafe { (*ports)[1] })),
             )
         }
-        _ => (0, 0),
+        _ => (None, None),
     };
 
     let count = LINEAR_RULE_COUNT
@@ -152,17 +152,20 @@ fn eval_ipv4_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         if rule.protocol_set() && proto as u8 != rule.common.protocol as u8 {
             continue;
         }
-        if rule.source_port_set()
-            && (src_port < rule.common.source_port_min || src_port > rule.common.source_port_max)
-        {
-            continue;
+        if rule.source_port_set() {
+            let Some(src_port) = src_port else { continue };
+            if src_port < rule.common.source_port_min || src_port > rule.common.source_port_max {
+                continue;
+            }
         }
 
-        if rule.destination_port_set()
-            && (dst_port < rule.common.destination_port_min
-                || dst_port > rule.common.destination_port_max)
-        {
-            continue;
+        if rule.destination_port_set() {
+            let Some(dst_port) = dst_port else { continue };
+            if dst_port < rule.common.destination_port_min
+                || dst_port > rule.common.destination_port_max
+            {
+                continue;
+            }
         }
         return match rule.common.action {
             Action::Pass => Ok(xdp_action::XDP_PASS),
@@ -190,6 +193,7 @@ struct Ipv6ExtHdr {
     ext_len: u8,
 }
 
+/// Parses the ipv6 proto and offset, walking the chain for up to 8 steps.
 #[inline(always)]
 fn parse_ipv6_proto(
     hdr: &Ipv6Hdr,
@@ -206,7 +210,6 @@ fn parse_ipv6_proto(
                 next_proto = ext_hdr.next_hdr;
                 index += (ext_hdr.ext_len as usize + 1) * 8;
             }
-            IpProto::Ipv6Frag | IpProto::Esp => return Err(()),
             _ => return Ok((next_proto, index)),
         }
     }
@@ -229,9 +232,9 @@ fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
             let ports: *const [u16; 2] = boundaries.ptr_at(transport_offset)?;
             let src_port = u16::from_be(unsafe { (*ports)[0] });
             let dst_port = u16::from_be(unsafe { (*ports)[1] });
-            (src_port, dst_port)
+            (Some(src_port), Some(dst_port))
         }
-        _ => (0, 0),
+        _ => (None, None),
     };
     let count = LINEAR_RULE_COUNT
         .get(1)
@@ -264,17 +267,21 @@ fn eval_ipv6_hdr(context: &XdpContext, boundaries: &Boundaries, offset: usize) -
         if rule.protocol_set() && proto as u8 != rule.common.protocol as u8 {
             continue;
         }
-        if rule.source_port_set()
-            && (src_port < rule.common.source_port_min || src_port > rule.common.source_port_max)
-        {
-            continue;
+        if rule.source_port_set() {
+            let Some(src_port) = src_port else { continue };
+
+            if src_port < rule.common.source_port_min || src_port > rule.common.source_port_max {
+                continue;
+            }
         }
 
-        if rule.destination_port_set()
-            && (dst_port < rule.common.destination_port_min
-                || dst_port > rule.common.destination_port_max)
-        {
-            continue;
+        if rule.destination_port_set() {
+            let Some(dst_port) = dst_port else { continue };
+            if dst_port < rule.common.destination_port_min
+                || dst_port > rule.common.destination_port_max
+            {
+                continue;
+            }
         }
         return match rule.common.action {
             Action::Pass => Ok(xdp_action::XDP_PASS),

@@ -48,7 +48,9 @@ fn power_of_2_bucket(n: usize) -> usize {
 
 macro_rules! reserve_and_copy {
     ($bucket_size:literal, $copy_args:ident, $packet_len:ident, $ctx:ident) => {{
-        let mut res = PP_RING_BUF.reserve::<[u8; $bucket_size]>(0).ok_or(())?;
+        let Some(mut res) = PP_RING_BUF.reserve::<[u8; $bucket_size]>(0) else {
+            return Ok(xdp_action::XDP_PASS);
+        };
         let buf = res.as_mut_ptr() as *mut u8;
         let args = buf as *mut CopyArgs;
         const MAX_PAYLOAD: usize = $bucket_size - ARGS_LEN;

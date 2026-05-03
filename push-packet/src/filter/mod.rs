@@ -1,40 +1,43 @@
-use crate::rules::{Rule, RuleId};
+use crate::{
+    cast,
+    rules::{Rule, RuleId},
+};
 
 /// A simple interface for storing [`Rule`]s and getting the next available [`RuleId`] with id
 /// reclamation.
 #[derive(Default)]
 pub(crate) struct Filter {
     rules: Vec<Option<Rule>>,
-    free: Vec<usize>,
+    free: Vec<u32>,
 }
 
 impl Filter {
     pub fn next_rule_id(&self) -> RuleId {
         match self.free.last() {
             Some(&index) => RuleId(index),
-            None => RuleId(self.rules.len()),
+            None => RuleId(cast::usize_to_rule_index(self.rules.len())),
         }
     }
 
     pub fn add(&mut self, rule: Rule) {
         match self.free.pop() {
             None => self.rules.push(Some(rule)),
-            Some(index) => self.rules[index] = Some(rule),
+            Some(index) => self.rules[cast::rule_index_to_usize(index)] = Some(rule),
         }
     }
 
     pub fn get(&self, rule_id: RuleId) -> Option<&Rule> {
-        match self.rules.get(rule_id.0) {
+        match self.rules.get(cast::rule_index_to_usize(rule_id.0)) {
             Some(Some(rule)) => Some(rule),
             _ => None,
         }
     }
 
     pub fn remove(&mut self, rule_id: RuleId) -> Option<Rule> {
-        if rule_id.0 >= self.rules.len() {
+        if cast::rule_index_to_usize(rule_id.0) >= self.rules.len() {
             return None;
         }
-        match self.rules[rule_id.0].take() {
+        match self.rules[cast::rule_index_to_usize(rule_id.0)].take() {
             None => None,
             Some(rule) => {
                 self.free.push(rule_id.0);
@@ -44,10 +47,10 @@ impl Filter {
     }
 
     pub fn iter_rules(&self) -> impl Iterator<Item = (RuleId, &Rule)> {
-        self.rules
-            .iter()
-            .enumerate()
-            .filter_map(|(index, rule)| rule.as_ref().map(|rule| (RuleId(index), rule)))
+        self.rules.iter().enumerate().filter_map(|(index, rule)| {
+            rule.as_ref()
+                .map(|rule| (RuleId(cast::usize_to_rule_index(index)), rule))
+        })
     }
 }
 

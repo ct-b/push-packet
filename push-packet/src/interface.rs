@@ -28,11 +28,14 @@ impl Interface {
     /// # Errors
     /// Returns [`Error::InvalidInterfaceIndex`] if the index is invalid.
     /// Returns [`Error::InvalidInterfaceName`] if the name is invalid.
+    ///
+    /// # Panics
+    /// Panics if the interface name is not a valid string
     pub fn from_index(index: u32) -> Result<Self, Error> {
         let name = if_indextoname(index)
             .map_err(|_| Error::InvalidInterfaceIndex(index))?
-            .into_string()?
-            .clone();
+            .into_string()
+            .expect("Linux interface names are valid ASCII");
         if name.is_empty() {
             return Err(Error::InvalidInterfaceIndex(index));
         }

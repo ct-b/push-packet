@@ -31,7 +31,7 @@ pub trait Engine {
     /// Remove a rule from the engine
     ///
     /// # Errors
-    /// Returns [`Error::MissingRuleId`] if the rule id is not present in the filter.
+    /// Returns [`Error::MissingRule`] if the rule id is not present in the filter.
     /// Returns additional errors depending on the engine implementation.
     fn remove_rule(&mut self, rule_id: RuleId, rule: &Rule) -> Result<(), Error>;
 }

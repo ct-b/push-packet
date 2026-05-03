@@ -1,5 +1,5 @@
 use std::{
-    alloc::{Layout, alloc, dealloc},
+    alloc::{Layout, alloc, dealloc, handle_alloc_error},
     ptr::NonNull,
     sync::Arc,
 };
@@ -9,7 +9,7 @@ use crossbeam_queue::ArrayQueue;
 use push_packet_common::RouteArgs;
 use xdpilone::{IfInfo, Socket, SocketConfig, Umem, UmemConfig};
 
-use crate::{Error, Loader, channels::route, ebpf::map_owned};
+use crate::{Error, Loader, cast, channels::route, ebpf::map_owned, error::ErrnoExt};
 
 const XSK_MAP_NAME: &str = "XSK_MAP";
 
@@ -21,7 +21,7 @@ impl PacketBuffer {
             .map_err(|_| Error::InvalidSize("buffer size invalid"))?;
         // Safety: layout is non-zero
         let ptr = unsafe { alloc(layout) };
-        let ptr = NonNull::new(ptr).ok_or(Error::NullPointer)?;
+        let ptr = NonNull::new(ptr).unwrap_or_else(|| handle_alloc_error(layout));
         Ok(Self(ptr, layout))
     }
 
@@ -46,15 +46,21 @@ pub(crate) struct OwnedUmem {
 impl OwnedUmem {
     pub(crate) fn read<T: Copy>(&self, address: usize) -> T {
         // Safety: Address is kernel managed, guaranteed in bounds and not used for writes.
+        #[allow(clippy::as_conversions)]
         let ptr = unsafe { self.buffer.0.as_ptr().add(address) as *const T };
         // Safety: Address is kernel managed, guaranteed not currently used for writes.
         unsafe { ptr.read() }
     }
     pub(crate) fn data(&self, address: u64, len: u32) -> &[u8] {
         // Safety: Address is kernel managed, guaranteed in bounds and not used for writes.
-        let ptr = unsafe { self.buffer.0.as_ptr().add(address as usize) };
+        let ptr = unsafe {
+            self.buffer
+                .0
+                .as_ptr()
+                .add(cast::umem_offset_to_usize(address))
+        };
         // Safety: Address is kernel managed, guaranteed not currently used for writes.
-        unsafe { core::slice::from_raw_parts(ptr, len as usize) }
+        unsafe { core::slice::from_raw_parts(ptr, cast::packet_len_to_usize(len)) }
     }
 
     pub(crate) unsafe fn write_at(&self, address: usize, bytes: &[u8]) {
@@ -96,7 +102,7 @@ impl AfXdpSocketLoader {
     }
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
-        let headroom = self.umem_config.headroom as usize;
+        let headroom = cast::xsk_config_usize(self.umem_config.headroom);
         if headroom < core::mem::size_of::<RouteArgs>() {
             return Err(Error::InvalidSize("increase headroom to fit RouteArgs"));
         }
@@ -122,18 +128,25 @@ impl Loader for AfXdpSocketLoader {
         self.validate()?;
         let frame_size = self.umem_config.frame_size;
         let fill_size = self.umem_config.fill_size;
-        let buffer_size = self.umem_config.frame_size as usize * self.frame_count as usize;
+        let buffer_size = cast::xsk_config_usize(self.umem_config.frame_size)
+            * cast::xsk_config_usize(self.frame_count);
         let buffer = Box::new(PacketBuffer::new(buffer_size)?);
         // Safety: Properly page-aligned to 4096 bytes, buffer outlives umem in OwnedUmem
-        let umem = unsafe { Umem::new(self.umem_config, buffer.as_slice())? };
+        let umem = unsafe {
+            Umem::new(self.umem_config, buffer.as_slice()).xsk_error("couldn't create umem")?
+        };
 
         let mut info = IfInfo::invalid();
-        info.from_ifindex(self.interface_index)?;
+        info.from_ifindex(self.interface_index)
+            .xsk_error("couldn't get IfInfo from ifindex")?;
         info.set_queue(self.queue_id);
 
-        let sock = Socket::with_shared(&info, &umem)?;
+        let sock = Socket::with_shared(&info, &umem)
+            .xsk_error("couldn't create socket with shared umem")?;
 
-        let device = umem.fq_cq(&sock)?;
+        let device = umem
+            .fq_cq(&sock)
+            .xsk_error("couldn't create fill and completion queues")?;
         let (mut fill_queue, completion_queue) = device.into_parts();
 
         // Prefill the fill queue;
@@ -144,7 +157,7 @@ impl Loader for AfXdpSocketLoader {
             wf.commit();
         }
         // Set remaining frames as free
-        let free_list = Arc::new(ArrayQueue::new((self.frame_count) as usize));
+        let free_list = Arc::new(ArrayQueue::new(cast::xsk_config_usize(self.frame_count)));
         (fill_size..self.frame_count)
             .map(|i| u64::from(i) * u64::from(frame_size))
             .for_each(|addr| {
@@ -153,10 +166,12 @@ impl Loader for AfXdpSocketLoader {
                     .expect("frames cannot exceed frame_count, must fit");
             });
 
-        let rx_tx = umem.rx_tx(&sock, &self.socket_config)?;
-        let rx = rx_tx.map_rx()?;
-        let tx = rx_tx.map_tx()?;
-        umem.bind(&rx_tx)?;
+        let rx_tx = umem
+            .rx_tx(&sock, &self.socket_config)
+            .xsk_error("couldn't create rx and tx rings")?;
+        let rx = rx_tx.map_rx().xsk_error("couldn't map rx ring")?;
+        let tx = rx_tx.map_tx().xsk_error("couldn't map tx ring")?;
+        umem.bind(&rx_tx).xsk_error("couldn't bind umem")?;
 
         let umem = OwnedUmem { umem, buffer };
         let umem = Arc::new(umem);
@@ -164,7 +179,9 @@ impl Loader for AfXdpSocketLoader {
         let receiver = route::Receiver::new(rx, fill_queue, umem.clone(), free_list);
 
         let mut xsk_map: XskMap<MapData> = map_owned(ebpf, XSK_MAP_NAME)?;
-        xsk_map.set(self.queue_id, sock.as_raw_fd(), 0)?;
+        xsk_map
+            .set(self.queue_id, sock.as_raw_fd(), 0)
+            .map_err(|e| Error::map(XSK_MAP_NAME, e))?;
 
         Ok(AfXdpSocket {
             channel: Some((sender, receiver)),

@@ -8,7 +8,7 @@ use crate::{
     Error, Interface,
     af_xdp::{AfXdpSocket, AfXdpSocketLoader},
     channels::copy,
-    ebpf::{map_owned, xdp_program},
+    ebpf::{load_xdp_program, map_owned},
     filter::Filter,
     loader::Loader,
     rules::Action,
@@ -96,9 +96,11 @@ impl Loader for RelayLoader {
         let mut program_array: ProgramArray<_> = map_owned(ebpf, PROGRAM_ARRAY_NAME)?;
 
         let copy_receiver = if self.copy_enabled {
-            let program = xdp_program(ebpf, COPY_PROGRAM_NAME)?;
-            program.load()?;
-            program_array.set(0, program.fd()?, 0)?;
+            let program = load_xdp_program(ebpf, COPY_PROGRAM_NAME)?;
+            let fd = program.fd().map_err(Error::FileDescriptor)?;
+            program_array
+                .set(0, fd, 0)
+                .map_err(|e| Error::map(PROGRAM_ARRAY_NAME, e))?;
 
             let ring_buf: RingBuf<MapData> = map_owned(ebpf, RING_BUF_NAME)?;
             Some(ring_buf.into())
@@ -107,9 +109,11 @@ impl Loader for RelayLoader {
         };
 
         let af_xdp_socket = if self.route_enabled {
-            let program = xdp_program(ebpf, ROUTE_PROGRAM_NAME)?;
-            program.load()?;
-            program_array.set(1, program.fd()?, 0)?;
+            let program = load_xdp_program(ebpf, ROUTE_PROGRAM_NAME)?;
+            let fd = program.fd().map_err(Error::FileDescriptor)?;
+            program_array
+                .set(1, fd, 0)
+                .map_err(|e| Error::map(PROGRAM_ARRAY_NAME, e))?;
             let loader = self
                 .af_xdp_loader
                 .expect("AfXdpSocketLoader must exist if route_enabled");

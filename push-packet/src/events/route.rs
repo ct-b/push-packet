@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crossbeam_queue::ArrayQueue;
 use push_packet_common::RouteArgs;
 
-use crate::{af_xdp::OwnedUmem, rules::RuleId};
+use crate::{af_xdp::OwnedUmem, cast, rules::RuleId};
 
 /// A packet event captured with [`crate::rules::Action::Route`]. This will take a frame in the
 /// `AF_AXP` socket until it is [dropped](`Drop`), so it should be consumed quickly. Calling
@@ -29,7 +29,7 @@ impl RouteEvent<'_> {
     /// Returns the [`RuleId`] that the packet matched on
     #[must_use]
     pub fn rule_id(&self) -> RuleId {
-        RuleId(self.route_args().rule_id as usize)
+        RuleId(self.route_args().rule_id)
     }
 
     /// Returns the raw packet data
@@ -39,7 +39,7 @@ impl RouteEvent<'_> {
     }
 
     fn route_args(&self) -> RouteArgs {
-        let address = self.address as usize - core::mem::size_of::<RouteArgs>();
+        let address = cast::umem_offset_to_usize(self.address) - core::mem::size_of::<RouteArgs>();
         self.umem.read(address)
     }
 
@@ -61,7 +61,7 @@ impl OwnedRouteEvent {
     /// Returns the [`RuleId`] that matched for this packet.
     #[must_use]
     pub fn rule_id(&self) -> RuleId {
-        RuleId(self.route_args.rule_id as usize)
+        RuleId(self.route_args.rule_id)
     }
 
     /// Returns the raw packet data

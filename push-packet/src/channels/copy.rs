@@ -4,7 +4,7 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 use aya::maps::{MapData, RingBuf};
 use nix::poll::PollFlags;
 
-use crate::{error::Error, events::copy::CopyEvent};
+use crate::{channels::ChannelError, events::copy::CopyEvent};
 
 /// A receiver that receives [`CopyEvent`]s from the underlying [`RingBuf`]. Note that
 /// [`CopyEvent`]s hold a reference to the underlying [`RingBuf`] and must be dropped to restore
@@ -23,22 +23,21 @@ impl Receiver {
     /// Attempts to receive a [`CopyEvent`] without blocking.
     ///
     /// # Errors
-    /// Returns [`Error::NoRingBufItem`] if there is not a [`aya::maps::ring_buf::RingBufItem`]
-    /// available.
-    pub fn try_recv(&mut self) -> Result<CopyEvent<'_>, Error> {
+    /// Returns [`ChannelError::Empty`] if there is not a
+    /// [`aya::maps::ring_buf::RingBufItem`] available.
+    pub fn try_recv(&mut self) -> Result<CopyEvent<'_>, ChannelError> {
         self.ring_buf
             .next()
             .map(std::convert::Into::into)
-            .ok_or(Error::NoRingBufItem)
+            .ok_or(ChannelError::Empty)
     }
 
     /// Blocks until a [`CopyEvent`] is available
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ChannelDisconnected`] if the connection is dropped.
-    /// Returns [`Error::NixError`] on unexpected nix errors.
-    pub fn recv(&mut self) -> Result<CopyEvent<'_>, Error> {
+    /// Returns [`ChannelError::Disconnected`] if the connection is dropped.
+    pub fn recv(&mut self) -> Result<CopyEvent<'_>, ChannelError> {
         let ptr = &raw mut self.ring_buf;
         loop {
             // Safety: The &mut self is held through the whole fn, this satisfies the borrow

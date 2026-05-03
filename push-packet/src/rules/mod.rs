@@ -1,23 +1,36 @@
 //! Rule definitions and builders.
 
 mod action;
+mod error;
 mod net;
 mod port;
 
-use std::ops::RangeInclusive;
+use std::{fmt::Display, ops::RangeInclusive};
 
 pub use action::Action;
+pub use error::RuleError;
 use ipnet::IpNet;
 use net::IntoIpNet;
 use port::IntoPortRange;
 pub use push_packet_common::Protocol;
 
-use crate::error::Error;
+#[non_exhaustive]
+pub(crate) enum AddressFamily {
+    Any,
+    Ipv4,
+    Ipv6,
+}
 
 /// ID for a [`Rule`]. This can be used to track rules for dynamic removal. Removed [`RuleId`]s are
 /// reclaimed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RuleId(pub(crate) usize);
+pub struct RuleId(pub(crate) u32);
+
+impl Display for RuleId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// A rule for controlling packet routing. Rules can be build with [`RuleBuilder`] and require at
 /// least one filter constraint, and an action.
@@ -31,17 +44,10 @@ pub struct Rule {
 }
 
 impl TryFrom<RuleBuilder> for Rule {
-    type Error = Error;
+    type Error = RuleError;
     fn try_from(value: RuleBuilder) -> Result<Self, Self::Error> {
         value.build()
     }
-}
-
-#[non_exhaustive]
-pub(crate) enum AddressFamily {
-    Any,
-    Ipv4,
-    Ipv6,
 }
 
 impl Rule {
@@ -119,9 +125,9 @@ impl Rule {
 pub struct RuleBuilder {
     action: Option<Action>,
     protocol: Option<Protocol>,
-    source_cidr: Option<Result<IpNet, Error>>,
+    source_cidr: Option<Result<IpNet, RuleError>>,
     source_port: Option<RangeInclusive<u16>>,
-    destination_cidr: Option<Result<IpNet, Error>>,
+    destination_cidr: Option<Result<IpNet, RuleError>>,
     destination_port: Option<RangeInclusive<u16>>,
 }
 
@@ -194,9 +200,9 @@ impl RuleBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if there is a missing action, invalid cidr, or no constraints (ips,
+    /// Returns an [`RuleError`] if there is a missing action, invalid cidr, or no constraints (ips,
     /// ports, protocols).
-    pub fn build(self) -> Result<Rule, Error> {
+    pub fn build(self) -> Result<Rule, RuleError> {
         let Self {
             action,
             protocol,
@@ -206,7 +212,7 @@ impl RuleBuilder {
             destination_port,
         } = self;
 
-        let action = action.ok_or(Error::MissingRuleAction)?;
+        let action = action.ok_or(RuleError::MissingAction)?;
 
         if protocol.is_none()
             && source_cidr.is_none()
@@ -214,7 +220,7 @@ impl RuleBuilder {
             && destination_cidr.is_none()
             && destination_port.is_none()
         {
-            return Err(Error::MissingRuleConstraint);
+            return Err(RuleError::MissingConstraint);
         }
 
         let (source_cidr, destination_cidr) = match (source_cidr, destination_cidr) {
@@ -222,7 +228,7 @@ impl RuleBuilder {
                 let (src, dst) = (src?, dst?);
                 match (&src, &dst) {
                     (IpNet::V4(_), IpNet::V6(_)) | (IpNet::V6(_), IpNet::V4(_)) => {
-                        return Err(Error::IncompatibleAddresses);
+                        return Err(RuleError::IncompatibleAddresses);
                     }
                     _ => (Some(src), Some(dst)),
                 }
@@ -246,16 +252,13 @@ impl RuleBuilder {
 #[cfg(test)]
 mod tests {
 
-    use crate::{
-        error::Error,
-        rules::{Rule, action::Action},
-    };
+    use crate::rules::{Rule, action::Action, error::RuleError};
 
     #[test]
     fn rule_builder_requires_action() {
         assert!(matches!(
             Rule::source_cidr("127.0.0.1").build(),
-            Err(Error::MissingRuleAction)
+            Err(RuleError::MissingAction)
         ));
     }
 
@@ -263,7 +266,7 @@ mod tests {
     fn rule_builder_requires_a_constraint() {
         assert!(matches!(
             Rule::action(Action::Pass).build(),
-            Err(Error::MissingRuleConstraint)
+            Err(RuleError::MissingConstraint)
         ));
     }
 
@@ -297,7 +300,7 @@ mod tests {
                 .source_cidr("badip")
                 .action(Action::Pass)
                 .build()
-                .is_err_and(|e| matches!(e, Error::InvalidAddress(_)))
+                .is_err_and(|e| matches!(e, RuleError::InvalidAddress { .. }))
         );
     }
 }

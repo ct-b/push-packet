@@ -3,6 +3,7 @@
 #![deny(clippy::pedantic)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 #![deny(clippy::multiple_unsafe_ops_per_block)]
+#![deny(clippy::as_conversions)]
 #![allow(clippy::cast_possible_truncation)]
 //! push-packet is a high-level, extensible packet routing library built on eBPF with aya. It is
 //! intended to be a simple, yet flexible foundation for traffic analysis applications and
@@ -67,6 +68,7 @@
 
 mod af_xdp;
 mod array_ext;
+mod cast;
 mod ebpf;
 mod error;
 mod filter;
@@ -80,8 +82,10 @@ pub mod engine;
 pub mod events;
 pub mod rules;
 
+pub use channels::ChannelError;
 pub use error::Error;
 pub use interface::Interface;
 pub use loader::Loader;
 pub use push_packet_common::FrameKind;
+pub use rules::RuleError;
 pub use tap::{CopyConfig, RouteConfig, Tap, TapBuilder};

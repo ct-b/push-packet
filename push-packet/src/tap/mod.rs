@@ -214,7 +214,7 @@ impl<E: Engine> TapBuilder<E> {
         relay_loader.configure(&mut ebpf_loader)?;
         engine_loader.configure(&mut ebpf_loader)?;
 
-        let mut ebpf = ebpf_loader.load(E::EBPF_BYTES)?;
+        let mut ebpf = ebpf_loader.load(E::EBPF_BYTES).map_err(Error::LoadEbpf)?;
         let mut engine = engine_loader.load(&mut ebpf)?;
         let frame_kind = (frame_kind, FRAME_KIND_MAP).load(&mut ebpf)?;
         let relay = relay_loader.load(&mut ebpf)?;
@@ -224,7 +224,9 @@ impl<E: Engine> TapBuilder<E> {
         }
 
         let program = xdp_program(&mut ebpf, E::EBPF_PROGRAM_NAME)?;
-        program.attach(interface.name(), xdp_flags)?;
+        program
+            .attach(interface.name(), xdp_flags)
+            .map_err(|e| Error::attach_program(E::EBPF_PROGRAM_NAME, e))?;
 
         Ok(Tap {
             interface,
@@ -274,25 +276,35 @@ impl<E: Engine> Tap<E> {
     /// Returns a tuple of [`channels::route::Sender`] and [`channels::route::Receiver`].
     ///
     /// # Errors
-    /// Returns [`Error::MissingRouteChannel`] if `AF_XDP` socket was not configured.
+    /// Returns [`Error::RouteNotEnabled`] if routing is not enabled.
+    /// Returns [`Error::ChannelNotAvailable`] if the channel has already been taken.
     pub fn route_channel(
         &mut self,
     ) -> Result<(channels::route::Sender, channels::route::Receiver), Error> {
+        if !self.relay.route_enabled {
+            return Err(Error::RouteNotEnabled);
+        }
+
         self.relay
             .af_xdp_socket
             .as_mut()
-            .ok_or(Error::MissingRouteChannel)?
-            .channel
-            .take()
-            .ok_or(Error::MissingRouteChannel)
+            .and_then(|c| c.channel.take())
+            .ok_or(Error::ChannelNotAvailable)
     }
 
     /// Returns a [`channels::copy::Receiver`] for receiving data.
     ///
     /// # Errors
-    /// Returns [`Error::MissingRingBuf`] if the [`aya::maps::RingBuf`] does not exist.
+    /// Returns [`Error::CopyNotEnabled`] if copying is not enabled..
+    /// Returns [`Error::ChannelNotAvailable`] if the channel has already been taken.
     pub fn copy_receiver(&mut self) -> Result<channels::copy::Receiver, Error> {
-        self.relay.copy_receiver.take().ok_or(Error::MissingRingBuf)
+        if !self.relay.copy_enabled {
+            return Err(Error::CopyNotEnabled);
+        }
+        self.relay
+            .copy_receiver
+            .take()
+            .ok_or(Error::ChannelNotAvailable)
     }
 
     /// Add a [`Rule`] or [`RuleBuilder`](crate::rules::RuleBuilder).
@@ -325,12 +337,17 @@ impl<E: Engine> Tap<E> {
     /// Remove a [`Rule`] by its [`RuleId`].
     ///
     /// # Errors
-    /// Returns [`Error::MissingRuleId`] if the [`RuleId`] is invalid.
+    /// Returns [`Error::MissingRule`] if the [`RuleId`] is invalid.
     /// Returns an error if the [`Engine`] cannot remove the rule.
     pub fn remove_rule(&mut self, rule_id: RuleId) -> Result<Rule, Error> {
-        let rule = self.filter.get(rule_id).ok_or(Error::MissingRuleId)?;
+        let rule = self
+            .filter
+            .get(rule_id)
+            .ok_or(Error::MissingRule(rule_id))?;
         self.engine.remove_rule(rule_id, rule)?;
-        self.filter.remove(rule_id).ok_or(Error::MissingRuleId)
+        self.filter
+            .remove(rule_id)
+            .ok_or(Error::MissingRule(rule_id))
     }
 
     /// Access the [`Interface`]

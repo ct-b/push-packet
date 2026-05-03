@@ -2,6 +2,8 @@
 
 pub mod copy;
 
+mod error;
 pub mod route;
 
 mod poll;
+pub use error::ChannelError;

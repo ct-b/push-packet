@@ -4,7 +4,7 @@ use std::mem::offset_of;
 use aya::maps::ring_buf::RingBufItem;
 use push_packet_common::CopyArgs;
 
-use crate::rules::RuleId;
+use crate::{cast, rules::RuleId};
 
 /// A packet event captured with [`crate::rules::Action::Copy`]. This will block the ring buffer
 /// until it is [dropped](`Drop`), so it should be consumed quickly. Calling
@@ -38,7 +38,7 @@ fn parse_take(data: &[u8]) -> Option<u32> {
 
 fn parse_rule_id(data: &[u8]) -> RuleId {
     let rule_id = read_u32(data, offset_of!(CopyArgs, rule_id));
-    RuleId(rule_id as usize)
+    RuleId(rule_id)
 }
 
 fn parse_packet_len(data: &[u8]) -> u32 {
@@ -51,7 +51,7 @@ fn parse_data_len(data: &[u8]) -> u32 {
 
 fn parse_data(data: &[u8]) -> &[u8] {
     let header_len = core::mem::size_of::<CopyArgs>();
-    &data[header_len..(header_len + parse_data_len(data) as usize)]
+    &data[header_len..(header_len + cast::packet_len_to_usize(parse_data_len(data)))]
 }
 
 impl CopyEvent<'_> {

@@ -6,9 +6,9 @@ use crossbeam_queue::ArrayQueue;
 use nix::poll::PollFlags;
 use xdpilone::{CompletionQueue, FillQueue, RingRx, RingTx, xdp::XdpDesc};
 
-use crate::{Error, af_xdp::OwnedUmem, events::route::RouteEvent};
+use crate::{af_xdp::OwnedUmem, cast, channels::ChannelError, events::route::RouteEvent};
 
-const CACHE_CAPACITY: usize = 64;
+const CACHE_CAPACITY: u32 = 64;
 const FREE_LIST_BATCH: u32 = 64;
 
 /// Receiver for an `AF_XDP` socket.
@@ -31,13 +31,21 @@ impl Receiver {
             rx,
             fill_queue,
             umem,
-            cache: VecDeque::with_capacity(CACHE_CAPACITY),
+            cache: VecDeque::with_capacity(
+                CACHE_CAPACITY
+                    .try_into()
+                    .expect("u32 must fit in usize for targets"),
+            ),
             free_list,
         }
     }
 
     fn replenish_fill_queue(&mut self) {
-        if self.free_list.len() < FREE_LIST_BATCH as usize {
+        if self.free_list.len()
+            < FREE_LIST_BATCH
+                .try_into()
+                .expect("u32 must fit in usize for targets")
+        {
             return;
         }
         {
@@ -63,15 +71,14 @@ impl Receiver {
     /// starvation.
     ///
     /// # Errors
-    /// Returns [`Error::ChannelDisconnected`] if the channel is closed.
-    /// Returns [`Error::NixError`] on other poll failures.
+    /// Returns [`ChannelError::Disconnected`] if the channel is closed.
     #[allow(clippy::missing_panics_doc)]
-    pub fn recv(&mut self) -> Result<RouteEvent<'_>, Error> {
+    pub fn recv(&mut self) -> Result<RouteEvent<'_>, ChannelError> {
         self.replenish_fill_queue();
 
         while self.cache.is_empty() {
             {
-                let mut reader = self.rx.receive(CACHE_CAPACITY as u32);
+                let mut reader = self.rx.receive(CACHE_CAPACITY);
                 self.cache.extend(reader.by_ref());
                 reader.release();
             }
@@ -99,17 +106,16 @@ impl Receiver {
     /// starvation.
     ///
     /// # Errors
-    /// Returns [`Error::ChannelDisconnected`] if the channel is closed.
-    /// Returns [`Error::NixError`] on other poll failures.
-    /// Returns [`Error::WouldBlock`] if the operation would block.
-    pub fn try_recv(&mut self) -> Result<RouteEvent<'_>, Error> {
+    /// Returns [`ChannelError::Disconnected`] if the channel is closed.
+    /// Returns [`ChannelError::Empty`] if there are no packets available.
+    pub fn try_recv(&mut self) -> Result<RouteEvent<'_>, ChannelError> {
         self.replenish_fill_queue();
         if self.cache.is_empty() {
-            let mut reader = self.rx.receive(CACHE_CAPACITY as u32);
+            let mut reader = self.rx.receive(CACHE_CAPACITY);
             self.cache.extend(reader.by_ref());
             reader.release();
         }
-        let XdpDesc { addr, len, .. } = self.cache.pop_front().ok_or(Error::WouldBlock)?;
+        let XdpDesc { addr, len, .. } = self.cache.pop_front().ok_or(ChannelError::Empty)?;
 
         Ok(RouteEvent {
             len,
@@ -157,28 +163,29 @@ impl Sender {
     /// Attempts to send a packet.
     ///
     /// # Errors
-    /// Returns [`Error::ChannelDisconnected`] if the channel is closed.
-    /// Returns [`Error::NixError`] for poll errors.
+    /// Returns [`ChannelError::Disconnected`] if the channel is closed.
+    /// Returns [`ChannelError::Poll`] for unexpected poll errors.
     #[allow(clippy::missing_panics_doc)]
-    pub fn try_send(&mut self, data: impl AsRef<[u8]>) -> Result<(), Error> {
+    pub fn try_send(&mut self, data: impl AsRef<[u8]>) -> Result<(), ChannelError> {
         self.drain_completion_queue();
         let bytes = data.as_ref();
-        let address = self.free_list.pop().ok_or(Error::WouldBlock)?;
+        let address = self.free_list.pop().ok_or(ChannelError::Empty)?;
         // Safety: The address is from free_list, not accessible to the kernel.
         unsafe {
-            self.umem.write_at(address as usize, bytes);
+            self.umem
+                .write_at(cast::umem_offset_to_usize(address), bytes);
         }
         {
             let mut wt = self.tx.transmit(1);
             if !wt.insert_once(XdpDesc {
                 addr: address,
-                len: bytes.len() as u32,
+                len: cast::packet_len_to_u32(bytes.len()),
                 options: 0,
             }) {
                 self.free_list
                     .push(address)
                     .expect("free list cap = frame count");
-                return Err(Error::WouldBlock);
+                return Err(ChannelError::Empty);
             }
             wt.commit();
         }
@@ -191,9 +198,8 @@ impl Sender {
     /// Blocks until the packet is sent.
     ///
     /// # Errors
-    /// Returns [`Error::ChannelDisconnected`] if the channel is closed.
-    /// Returns [`Error::NixError`] for poll errors.
-    pub fn send(&mut self, data: impl AsRef<[u8]>) -> Result<(), Error> {
+    /// Returns [`ChannelError::Disconnected`] if the channel is closed.
+    pub fn send(&mut self, data: impl AsRef<[u8]>) -> Result<(), ChannelError> {
         let bytes = data.as_ref();
 
         let address = loop {
@@ -209,14 +215,15 @@ impl Sender {
 
         // Safety: The address came from free_list, and not accessible to the kernel
         unsafe {
-            self.umem.write_at(address as usize, bytes);
+            self.umem
+                .write_at(cast::umem_offset_to_usize(address), bytes);
         }
 
         loop {
             let mut wt = self.tx.transmit(1);
             if wt.insert_once(XdpDesc {
                 addr: address,
-                len: bytes.len() as u32,
+                len: cast::packet_len_to_u32(bytes.len()),
                 options: 0,
             }) {
                 wt.commit();

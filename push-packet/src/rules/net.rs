@@ -2,28 +2,29 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 
-use crate::error::Error;
+use crate::rules::error::RuleError;
 
 pub trait IntoIpNet {
-    fn into_ip_net(self) -> Result<IpNet, Error>;
+    fn into_ip_net(self) -> Result<IpNet, RuleError>;
 }
 
 impl IntoIpNet for &str {
-    fn into_ip_net(self) -> Result<IpNet, Error> {
+    fn into_ip_net(self) -> Result<IpNet, RuleError> {
         if !self.contains('/') {
             return self
                 .parse::<IpAddr>()
                 .map(std::convert::Into::into)
-                .map_err(Into::into);
+                .map_err(|e| RuleError::invalid_address(self, e));
         }
-        self.parse::<IpNet>().map_err(Into::into)
+        self.parse::<IpNet>()
+            .map_err(|e| RuleError::invalid_cidr(self, e))
     }
 }
 
 macro_rules! impl_into_ip_net {
     ($type:ty) => {
         impl IntoIpNet for $type {
-            fn into_ip_net(self) -> Result<IpNet, Error> {
+            fn into_ip_net(self) -> Result<IpNet, RuleError> {
                 Ok(self.into())
             }
         }
@@ -33,7 +34,7 @@ macro_rules! impl_into_ip_net {
 macro_rules! impl_into_ip_net_addr {
     ($type:ty, $proxy_type:ty) => {
         impl IntoIpNet for $type {
-            fn into_ip_net(self) -> Result<IpNet, Error> {
+            fn into_ip_net(self) -> Result<IpNet, RuleError> {
                 let net: $proxy_type = self.into();
                 Ok(net.into())
             }
@@ -54,7 +55,7 @@ mod tests {
 
     use ipnet::IpNet;
 
-    use crate::{error::Error, rules::net::IntoIpNet};
+    use crate::rules::{error::RuleError, net::IntoIpNet};
 
     #[test]
     fn parse_bare_ipv4() {
@@ -101,7 +102,7 @@ mod tests {
         assert!(
             "notanip"
                 .into_ip_net()
-                .is_err_and(|e| matches!(e, Error::InvalidAddress(_)))
+                .is_err_and(|e| matches!(e, RuleError::InvalidAddress { .. }))
         );
     }
 
@@ -110,7 +111,7 @@ mod tests {
         assert!(
             "not/an/ip"
                 .into_ip_net()
-                .is_err_and(|e| matches!(e, Error::InvalidNetAddress(_)))
+                .is_err_and(|e| matches!(e, RuleError::InvalidCidr { .. }))
         );
     }
 }

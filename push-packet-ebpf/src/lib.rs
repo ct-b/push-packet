@@ -15,12 +15,11 @@ use aya_ebpf::{
     maps::{PerCpuArray, RingBuf, XskMap},
     programs::XdpContext,
 };
-use push_packet_common::{CopyArgs, RouteArgs};
+use push_packet_common::{CopyArgs, DEFAULT_RING_BUF_SIZE, RouteArgs};
 
 use crate::args_ext::RouteArgsExt;
 
 const ARGS_LEN: usize = core::mem::size_of::<CopyArgs>();
-const DEFAULT_RING_BUF_SIZE: u32 = 262144;
 
 // Input parameters for the copy program
 #[map]

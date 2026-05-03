@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use aya::{Ebpf, EbpfLoader, programs::XdpFlags};
-use push_packet_common::FrameKind;
+use push_packet_common::{DEFAULT_RING_BUF_SIZE, FrameKind};
 use xdpilone::{SocketConfig, UmemConfig};
 
 use crate::{
@@ -19,10 +19,22 @@ use crate::{
 const FRAME_KIND_MAP: &str = "FRAME_KIND_MAP";
 
 /// Optional configuration for copying packets.
-#[derive(Default)]
+///
+/// This [`Default`]s to the following:
+/// - `ring_buf_size`: 256kb
+/// - `force_enabled`: false
 pub struct CopyConfig {
-    pub(crate) ring_buf_size: Option<u32>,
+    pub(crate) ring_buf_size: u32,
     pub(crate) force_enabled: bool,
+}
+
+impl Default for CopyConfig {
+    fn default() -> Self {
+        Self {
+            ring_buf_size: DEFAULT_RING_BUF_SIZE,
+            force_enabled: false,
+        }
+    }
 }
 
 impl CopyConfig {
@@ -37,14 +49,28 @@ impl CopyConfig {
     /// Override the default ring buffer size.
     #[must_use]
     pub fn ring_buf_size(mut self, ring_buf_size: u32) -> Self {
-        self.ring_buf_size = Some(ring_buf_size);
+        self.ring_buf_size = ring_buf_size;
         self
     }
 }
 
 /// Optional configuration for routing packets.
 ///
-/// This [`Default`]s to the following sizes:
+/// Presently, `AF_XDP` routing is configured with a shared UMEM region, with a queue serving as a
+/// free list to coordinate available frames.
+///
+/// This [`Default`]s to the following:
+/// - `force_enabled`: false
+/// - `umem_config.fill_size`: 2048 frames
+/// - `umem_config.complete_size`: 2048 frames
+/// - `umem_config.frame_size`: 4096 bytes
+/// - `umem_config.headroom`: 32 bytes
+/// - `umem_config.flags`: 0
+/// - `socket_config.rx_size`: 2048 frames
+/// - `socket_config.tx_size`: 2048 frames
+/// - `socket_config.bind_flags`: `SocketConfig::XDP_BIND_NEED_WAKEUP`
+/// - `frame_count`: 8192
+/// - `queue_id`: 0
 pub struct RouteConfig {
     pub(crate) force_enabled: bool,
     pub(crate) umem_config: UmemConfig,

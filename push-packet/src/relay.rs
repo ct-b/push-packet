@@ -2,7 +2,7 @@ use aya::{
     Ebpf, EbpfLoader,
     maps::{MapData, ProgramArray, RingBuf},
 };
-use push_packet_common::RING_BUF_NAME;
+use push_packet_common::{DEFAULT_RING_BUF_SIZE, RING_BUF_NAME};
 
 use crate::{
     Error, Interface,
@@ -23,7 +23,7 @@ const PROGRAM_ARRAY_NAME: &str = "PROGRAM_ARRAY";
 pub(crate) struct RelayLoader {
     copy_enabled: bool,
     route_enabled: bool,
-    ring_buf_size: Option<u32>,
+    ring_buf_size: u32,
     af_xdp_loader: Option<AfXdpSocketLoader>,
 }
 
@@ -78,8 +78,8 @@ impl Loader for RelayLoader {
     type Component = Relay;
 
     fn configure(&self, ebpf_loader: &mut EbpfLoader) -> Result<(), Error> {
-        if let Some(size) = self.ring_buf_size {
-            ebpf_loader.set_max_entries(RING_BUF_NAME, size);
+        if self.ring_buf_size != DEFAULT_RING_BUF_SIZE {
+            ebpf_loader.set_max_entries(RING_BUF_NAME, self.ring_buf_size);
         }
         if let Some(af_xdp_loader) = &self.af_xdp_loader {
             af_xdp_loader.configure(ebpf_loader)?;

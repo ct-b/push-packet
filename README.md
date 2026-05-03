@@ -85,12 +85,16 @@ Push-packet is oriented around an [Engine] trait, which specifies the accompanyi
 #### Copy
 Packets are copied to userspace using a [BPF ring buffer]. Compared to a [perf event buffer], this preserves packet ordering at the cost of potential atomic contention under high load. Support for the perf event buffer may be added in the future.
 
+Events returned from the [`copy::Receiver`] borrow into the ring buffer; they should be dropped quickly or converted with [`CopyEvent::into_owned`] to ensure all packets are copied.
+
 #### Route
 Packets are routed to userspace using an AF_XDP socket. This allows for zero-copy routing on compatible network devices.
 
 The AF_XDP implementation currently consists of one [UMEM] region with one socket, and addresses exchanged via a queue. In the future, other configurations may be supported, such as:
 - Multiple sockets (1 per queue_id) with a shared UMEM.
 - Multiple independent socket/UMEM setups, one per queue_id.
+
+Events returned from the [`route::Receiver`] borrow into the UMEM region of the AF_XDP socket. They should be dropped quickly or converted with [`RouteEvent::into_owned`] to avoid depleting available UMEM frames.
 
 ## Motivation
 
@@ -150,3 +154,7 @@ dual licensed as above, without any additional terms or conditions.
 [TC]: https://man7.org/linux/man-pages/man8/tc-bpf.8.html
 [Engine]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/engine/mod.rs
 [LinearEngine]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/engine/linear/mod.rs
+[`copy::Receiver`]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/channels/copy.rs
+[`CopyEvent::into_owned`]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/events/copy.rs
+[`route::Receiver`]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/channels/route.rs
+[`RouteEvent::into_owned`]: https://github.com/ct-b/push-packet/blob/main/push-packet/src/events/route.rs

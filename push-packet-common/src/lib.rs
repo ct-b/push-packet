@@ -2,6 +2,7 @@
 pub mod engine;
 
 pub const RING_BUF_NAME: &str = "PP_RING_BUF";
+pub const DEFAULT_RING_BUF_SIZE: u32 = 262144;
 
 /// Shared protocol, used for setting and executing filter rules
 #[non_exhaustive]

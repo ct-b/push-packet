@@ -146,8 +146,8 @@ dual licensed as above, without any additional terms or conditions.
 [aya]: https://aya-rs.dev
 [eBPF]: https://ebpf.io/
 [AF_XDP]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html
-[BPF ring buffer]: https://www.kernel.org/doc/html/latest/bpf/ringbuf.html
-[perf event buffer]: https://www.kernel.org/doc/html/latest/bpf/map_perf_event_array.html
+[BPF ring buffer]: https://docs.ebpf.io/linux/map-type/BPF_MAP_TYPE_RINGBUF/
+[perf event buffer]: https://docs.ebpf.io/linux/map-type/BPF_MAP_TYPE_PERF_EVENT_ARRAY/
 [UMEM]: https://www.kernel.org/doc/html/latest/networking/af_xdp.html#umem
 [smoltcp]: https://github.com/smoltcp-rs/smoltcp
 [DPDK]: https://www.dpdk.org/

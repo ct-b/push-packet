@@ -40,7 +40,7 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --exclude push-packet-ebpf --all-targets --all-features -- -D warnings
       - name: test
-        run: cargo test --workspace --exclude push-packet-ebpf --all-features
+        run: cargo test --workspace --exclude push-packet-ebpf --all-features -- --include-ignored
       - name: doc
         run: cargo doc --workspace --exclude push-packet-ebpf --all-features --no-deps
       - name: clippy-ebpf

@@ -14,12 +14,12 @@ use crate::common::VethHarness;
 #[ignore]
 fn route_packets() -> Result<(), Box<dyn std::error::Error>> {
     VethHarness::run(|harness| {
-        let mut tap = Tap::builder(harness.veth_2())?
+        let mut tap = Tap::builder(harness.veth_2())
             .rule(
                 Rule::builder()
                     .source_cidr(harness.veth_1_ip())
                     .action(Action::Route),
-            )?
+            )
             .build()?;
         let (_tx, mut rx) = tap.route_channel()?;
 

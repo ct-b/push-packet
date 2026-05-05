@@ -1,10 +1,11 @@
-use std::num::NonZeroU32;
+use std::{marker::PhantomData, num::NonZeroU32};
 
 use aya::{Ebpf, EbpfLoader, programs::XdpFlags};
 use push_packet_common::{DEFAULT_RING_BUF_SIZE, FrameKind};
 use xdpilone::{SocketConfig, UmemConfig};
 
 use crate::{
+    RuleError,
     channels::{self},
     ebpf::{EbpfVar, xdp_program},
     engine::{Engine, linear::LinearEngine},
@@ -146,43 +147,37 @@ impl RouteConfig {
 
 /// Builder for a [`Tap`].
 pub struct TapBuilder<E: Engine = LinearEngine> {
-    interface: Interface,
-    frame_kind: FrameKind,
-    engine_loader: E::Loader,
-    filter: Filter,
+    interface: Result<Interface, Error>,
     xdp_flags: XdpFlags,
     copy_config: CopyConfig,
     route_config: RouteConfig,
+    rules: Vec<Result<Rule, RuleError>>,
+    _marker: PhantomData<E>,
 }
 
 impl<E: Engine> TapBuilder<E> {
     /// Creates a new [`TapBuilder`] from the given interface name or number.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`Error`] if the [`Interface`] is invalid, or uses an unsupported [`FrameKind`].
-    pub fn new<I>(interface: I) -> Result<Self, Error>
+    pub fn new<I>(interface: I) -> Self
     where
         I: TryInto<Interface>,
         I::Error: Into<Error>,
     {
-        let interface = interface.try_into().map_err(Into::into)?;
-        let frame_kind = interface.frame_kind()?;
-        let engine_loader = E::Loader::default();
-        let filter = Filter::default();
+        let interface = interface.try_into().map_err(Into::into);
         let copy_config = CopyConfig::default();
         let route_config = RouteConfig::default();
         let xdp_flags = XdpFlags::default();
+        let rules = vec![];
+        let _marker = PhantomData;
 
-        Ok(Self {
+        Self {
             interface,
-            frame_kind,
-            engine_loader,
-            filter,
             xdp_flags,
             copy_config,
             route_config,
-        })
+            rules,
+            #[allow(clippy::used_underscore_binding)]
+            _marker,
+        }
     }
 
     /// Set the [`XdpFlags`].
@@ -207,33 +202,46 @@ impl<E: Engine> TapBuilder<E> {
     }
 
     /// Chain a rule in a builder pattern.
-    ///
-    /// # Errors
-    /// Returns an [`Error`] if a provided [`crate::rules::RuleBuilder`] fails to build.
-    pub fn rule<R>(mut self, rule: R) -> Result<Self, Error>
+    #[must_use]
+    pub fn rule<R>(mut self, rule: R) -> Self
     where
-        R: TryInto<Rule>,
-        R::Error: Into<Error>,
+        R: TryInto<Rule, Error = RuleError>,
     {
-        let rule = rule.try_into().map_err(Into::into)?;
-        self.filter.add(rule);
-        Ok(self)
+        let rule = rule.try_into();
+        self.rules.push(rule);
+        self
     }
 
     /// Builds the [`Tap`].
     ///
     /// # Errors
-    /// Returns an [`Error`] if any subcomponents fail to load or attach
+    /// Returns [`Error::BuilderRule`] if a rule builder fails to build.
+    /// Returns [`Error::InvalidInterfaceName`] or [`Error::InvalidInterfaceIndex`] if the interface
+    /// provided is invalid.
+    /// Returns [`Error::InvalidFrameKind`] if the interface does not use Eth or IP frames.
+    /// May return additional [`Error`]s if the eBPF programs fail to load or attach.
     pub fn build(self) -> Result<Tap<E>, Error> {
         let Self {
             interface,
-            frame_kind,
-            engine_loader,
-            filter,
             xdp_flags,
             copy_config,
             route_config,
+            rules,
+            ..
         } = self;
+        let interface = interface?;
+        let frame_kind = interface.frame_kind()?;
+
+        let mut filter = Filter::default();
+        for (i, rule) in rules.into_iter().enumerate() {
+            let rule = rule.map_err(|e| Error::BuilderRule {
+                index: i,
+                source: e,
+            })?;
+            filter.add(rule);
+        }
+
+        let engine_loader = E::Loader::default();
         let mut ebpf_loader = EbpfLoader::new();
 
         let relay_loader = RelayLoader::new(copy_config, route_config, &filter, &interface);
@@ -279,12 +287,7 @@ pub struct Tap<E: Engine = LinearEngine> {
 
 impl Tap {
     /// Creates a new [`TapBuilder`] with the specified [`Interface`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidInterfaceName`] or [`Error::InvalidInterfaceIndex`] if the interface
-    /// is invalid.
-    pub fn builder<I>(interface: I) -> Result<TapBuilder, Error>
+    pub fn builder<I>(interface: I) -> TapBuilder
     where
         I: TryInto<Interface>,
         I::Error: Into<Error>,

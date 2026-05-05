@@ -194,7 +194,7 @@ fn main() -> color_eyre::Result<()> {
         // This allows us to determine the header size based on the FrameKind for the take, which
         // allows us to copy only data we are interested in, regardless of whether the interface
         // uses eth or ip frames.
-        let mut tap = Tap::builder(iface)?
+        let mut tap = Tap::builder(iface)
             .copy_config(CopyConfig::default().force_enabled())
             .build()?;
 

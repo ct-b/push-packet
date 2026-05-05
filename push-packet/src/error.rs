@@ -50,8 +50,14 @@ impl Error {
 #[non_exhaustive]
 pub enum Error {
     // From internal error types
+    #[error("rule error at index: {index}")]
+    BuilderRule {
+        index: usize,
+        #[source]
+        source: RuleError,
+    },
     #[error(transparent)]
-    Rule(#[from] RuleError),
+    RuntimeRule(#[from] RuleError),
     #[error(transparent)]
     Channel(#[from] ChannelError),
 

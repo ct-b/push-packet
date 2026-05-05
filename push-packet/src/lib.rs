@@ -13,12 +13,8 @@
 //! ```no_run
 //! # use push_packet::{Tap, rules::{Rule, Action}};
 //! # fn main() -> Result<(), push_packet::Error> {
-//! let mut tap = Tap::builder("wlp3s0")?
-//!     .rule(
-//!         Rule::builder()
-//!             .source_cidr("0.0.0.0/0")
-//!             .action(Action::Copy { take: None }),
-//!     )?
+//! let mut tap = Tap::builder("wlp3s0")
+//!     .rule(Rule::source_cidr("0.0.0.0/0").action(Action::Copy { take: None }))
 //!     .build()?;
 //!
 //! let mut rx = tap.copy_receiver()?;
@@ -32,7 +28,7 @@
 //! ```no_run
 //! # use push_packet::{Tap, rules::{Rule, Action, Protocol}, CopyConfig};
 //! # fn main() -> Result<(), push_packet::Error> {
-//! let mut tap = Tap::builder("wlp3s0")?
+//! let mut tap = Tap::builder("wlp3s0")
 //!     // Set force_enabled on the copy config so we can use copy rules later.
 //!     .copy_config(CopyConfig::default().force_enabled())
 //!     .build()?;

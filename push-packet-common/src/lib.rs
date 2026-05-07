@@ -7,7 +7,7 @@ pub const DEFAULT_RING_BUF_SIZE: u32 = 262144;
 /// Shared protocol, used for setting and executing filter rules
 #[non_exhaustive]
 #[repr(u8)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Protocol {
     Icmp = 1,
     #[default]
